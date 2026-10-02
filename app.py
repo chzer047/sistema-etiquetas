@@ -4454,8 +4454,9 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
                 _run_pref.font.name = FONTE
                 _run_pref.font.size = _Pt(TAM_PREFIXO)
                 _run_pref.bold = True
-                # Remove o padrão **PREFIXO:** do início do bloco
-                _bloco_restante = re.sub(r'^\*\*' + re.escape(_pref) + r'\*\*\s*', '',
+                # Remove o padrão **PREFIXO:** do início do bloco.
+                # Tolera espaço antes do ** de fechamento ("**ATENÇÃO: **" e "**ATENÇÃO:**").
+                _bloco_restante = re.sub(r'^\*\*\s*' + re.escape(_pref) + r'\s*\*\*\s*', '',
                                          _bloco_restante, flags=re.IGNORECASE).lstrip()
                 _achou_pref = True
                 break
@@ -4471,7 +4472,7 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
     # vai para a ESQUERDA, junto do selo/importador (não é só alinhamento).
     _bloco_na_esquerda = dados.get('tipo') == 'pilha'
     _cell_ref_barras = cell_esq if _bloco_na_esquerda else cell_dir
-    _alinhamento_ref_barras = _ALIGN.LEFT if _bloco_na_esquerda else _ALIGN.CENTER
+    _alinhamento_ref_barras = _ALIGN.CENTER  # sempre centralizado, independente da coluna
 
     pref = _cell_ref_barras.add_paragraph()
     pref.alignment = _alinhamento_ref_barras
@@ -4491,6 +4492,15 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         pbar.alignment = _alinhamento_ref_barras
         pbar.paragraph_format.space_after = _Pt(0)
         pbar.add_run().add_picture(_Bio(barcode_png), width=_Cm(LARG_BARRAS), height=_Cm(ALT_BARRAS))
+
+    # Imagem de pilha/bateria: entra na coluna DIREITA para produtos tipo "pilha",
+    # abaixo dos textos de ATENÇÃO/INDICAÇÃO/ADVERTÊNCIA.
+    if pilha_png and dados.get('tipo') == 'pilha':
+        ppilha = cell_dir.add_paragraph()
+        ppilha.alignment = _ALIGN.CENTER
+        ppilha.paragraph_format.space_after = _Pt(0)
+        ppilha.paragraph_format.space_before = _Pt(2)
+        ppilha.add_run().add_picture(_Bio(pilha_png), width=_Cm(LARG_COL - 0.4))
 
     # ---- RODAPÉ ----
     cell_rod = tabela.cell(1, 0).merge(tabela.cell(1, 1))
