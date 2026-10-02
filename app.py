@@ -4351,6 +4351,61 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         drawing.remove(inline)
         drawing.append(anchor)
 
+    def _tornar_imagem_flutuante_direita(run, doc_pr_id=200):
+        """Converte imagem de inline para âncora flutuante 'Frente ao Texto'
+        (wp:wrapNone) posicionada no canto DIREITO do parágrafo — para a imagem
+        de pilha/bateria aparecer discreta no lado direito da coluna, sem
+        empurrar o texto (fica sobreposta)."""
+        drawing = run._element.find(_qn('w:drawing'))
+        inline = drawing.find(_qn('wp:inline'))
+        filhos = {child.tag.split('}')[-1]: child for child in inline}
+        extent = filhos['extent']
+        docPr = filhos['docPr']
+        cNvGraphicFramePr = filhos.get('cNvGraphicFramePr')
+        graphic = filhos['graphic']
+
+        anchor = _OxmlElement('wp:anchor')
+        for _attr, _val in [('distT', '0'), ('distB', '0'), ('distL', '0'), ('distR', '0'),
+                             ('simplePos', '0'), ('relativeHeight', str(251659264 + doc_pr_id)),
+                             ('behindDoc', '0'), ('locked', '0'), ('layoutInCell', '1'), ('allowOverlap', '1')]:
+            anchor.set(_attr, _val)
+
+        simplePos = _OxmlElement('wp:simplePos')
+        simplePos.set('x', '0'); simplePos.set('y', '0')
+        anchor.append(simplePos)
+
+        positionH = _OxmlElement('wp:positionH')
+        positionH.set('relativeFrom', 'column')
+        alignH = _OxmlElement('wp:align')
+        alignH.text = 'right'
+        positionH.append(alignH)
+        anchor.append(positionH)
+
+        positionV = _OxmlElement('wp:positionV')
+        positionV.set('relativeFrom', 'paragraph')
+        alignV = _OxmlElement('wp:align')
+        alignV.text = 'top'
+        positionV.append(alignV)
+        anchor.append(positionV)
+
+        anchor.append(extent)
+
+        effectExtent = _OxmlElement('wp:effectExtent')
+        for _attr in ('l', 't', 'r', 'b'):
+            effectExtent.set(_attr, '0')
+        anchor.append(effectExtent)
+
+        wrapNone = _OxmlElement('wp:wrapNone')
+        anchor.append(wrapNone)
+
+        anchor.append(docPr)
+        if cNvGraphicFramePr is not None:
+            anchor.append(cNvGraphicFramePr)
+        anchor.append(graphic)
+
+        drawing.remove(inline)
+        drawing.append(anchor)
+
     def _adicionar_borda_superior(paragrafo):
         """Linha divisória preta acima do parágrafo, igual à do molde real
         (<w:pBdr><w:top w:val="single" w:sz="4" w:space="1" w:color="auto"/></w:pBdr>)."""
@@ -4493,14 +4548,15 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         pbar.paragraph_format.space_after = _Pt(0)
         pbar.add_run().add_picture(_Bio(barcode_png), width=_Cm(LARG_BARRAS), height=_Cm(ALT_BARRAS))
 
-    # Imagem de pilha/bateria: entra na coluna DIREITA para produtos tipo "pilha",
-    # abaixo dos textos de ATENÇÃO/INDICAÇÃO/ADVERTÊNCIA.
+    # Imagem de pilha/bateria: flutuante "Frente ao Texto" no lado DIREITO da
+    # coluna direita — discreta (~1,8 cm), ancorada no parágrafo do bloco de texto.
     if pilha_png and dados.get('tipo') == 'pilha':
         ppilha = cell_dir.add_paragraph()
-        ppilha.alignment = _ALIGN.CENTER
         ppilha.paragraph_format.space_after = _Pt(0)
-        ppilha.paragraph_format.space_before = _Pt(2)
-        ppilha.add_run().add_picture(_Bio(pilha_png), width=_Cm(LARG_COL - 0.4))
+        ppilha.paragraph_format.space_before = _Pt(0)
+        run_pilha = ppilha.add_run()
+        run_pilha.add_picture(_Bio(pilha_png), width=_Cm(1.8))
+        _tornar_imagem_flutuante_direita(run_pilha, doc_pr_id=200)
 
     # ---- RODAPÉ ----
     cell_rod = tabela.cell(1, 0).merge(tabela.cell(1, 1))
