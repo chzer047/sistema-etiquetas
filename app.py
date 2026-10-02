@@ -12360,7 +12360,9 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                 from openpyxl import load_workbook as _lwb_g
 
                 # --- Ler o Excel e localizar cabeçalho (mesma lógica da conferência) ---
-                @st.cache_data(show_spinner=False)
+                # IMPORTANTE: sem @st.cache_data aqui — a função é definida dentro de um
+                # bloco condicional e o Streamlit não invalida o cache corretamente quando
+                # o usuário sobe um arquivo diferente com o mesmo nome. Sempre relê.
                 def _carregar_itens_excel_geracao(_file_bytes, _nome):
                     import tempfile as _tmp_g, os as _os_g, subprocess as _sub_g, glob as _glob_g
                     _dir = _tmp_g.mkdtemp()
