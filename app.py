@@ -4351,13 +4351,10 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         drawing.remove(inline)
         drawing.append(anchor)
 
-    def _tornar_imagem_flutuante_direita(run, doc_pr_id=200):
-        """Converte imagem de inline para âncora flutuante 'Frente ao Texto'
-        (wp:wrapNone) posicionada no canto DIREITO da coluna — para a imagem
-        de pilha/bateria aparecer discreta, sem empurrar o layout.
-        Valores de posOffset extraídos do docx de referência (etiquetas_35.docx):
-          positionH relativeFrom='column' posOffset=1666875 (≈4,63 cm da esquerda)
-          positionV relativeFrom='paragraph' posOffset=172085 (≈0,48 cm do topo)"""
+    def _tornar_imagem_flutuante_canto_superior_direito(run, doc_pr_id=200):
+        """Espelho do chorão: âncora flutuante no canto superior DIREITO da coluna,
+        wrapSquare wrapText="left" — o texto de ADVERTÊNCIA flui à esquerda da imagem.
+        Precisa ser o PRIMEIRO run do parágrafo (antes do texto)."""
         drawing = run._element.find(_qn('w:drawing'))
         inline = drawing.find(_qn('wp:inline'))
         filhos = {child.tag.split('}')[-1]: child for child in inline}
@@ -4367,8 +4364,8 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         graphic = filhos['graphic']
 
         anchor = _OxmlElement('wp:anchor')
-        for _attr, _val in [('distT', '0'), ('distB', '0'), ('distL', '114300'), ('distR', '114300'),
-                             ('simplePos', '0'), ('relativeHeight', str(251658240 + doc_pr_id)),
+        for _attr, _val in [('distT', '0'), ('distB', '0'), ('distL', '0'), ('distR', '114300'),
+                             ('simplePos', '0'), ('relativeHeight', str(251659264 + doc_pr_id)),
                              ('behindDoc', '0'), ('locked', '0'), ('layoutInCell', '1'), ('allowOverlap', '1')]:
             anchor.set(_attr, _val)
 
@@ -4378,16 +4375,16 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
 
         positionH = _OxmlElement('wp:positionH')
         positionH.set('relativeFrom', 'column')
-        posOffH = _OxmlElement('wp:posOffset')
-        posOffH.text = '1666875'
-        positionH.append(posOffH)
+        alignH = _OxmlElement('wp:align')
+        alignH.text = 'right'
+        positionH.append(alignH)
         anchor.append(positionH)
 
         positionV = _OxmlElement('wp:positionV')
         positionV.set('relativeFrom', 'paragraph')
-        posOffV = _OxmlElement('wp:posOffset')
-        posOffV.text = '172085'
-        positionV.append(posOffV)
+        alignV = _OxmlElement('wp:align')
+        alignV.text = 'top'
+        positionV.append(alignV)
         anchor.append(positionV)
 
         anchor.append(extent)
@@ -4397,8 +4394,9 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
             effectExtent.set(_attr, '0')
         anchor.append(effectExtent)
 
-        wrapNone = _OxmlElement('wp:wrapNone')
-        anchor.append(wrapNone)
+        wrapSquare = _OxmlElement('wp:wrapSquare')
+        wrapSquare.set('wrapText', 'left')
+        anchor.append(wrapSquare)
 
         anchor.append(docPr)
         if cNvGraphicFramePr is not None:
@@ -4485,6 +4483,16 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
             _run_chorao.add_picture(_Bio(chorao_png), width=_Cm(0.9))
             _tornar_imagem_flutuante_canto_superior_esquerdo(_run_chorao, LARG_COL)
 
+        # Pilha/bateria: imagem FLUTUANTE ancorada no canto superior DIREITO
+        # do parágrafo ADVERTÊNCIA (wrapSquare wrapText="left") — texto flui
+        # à esquerda, imagem fica discreta no canto direito entre INDICAÇÃO e ADVERTÊNCIA.
+        # Deve ser o PRIMEIRO run do parágrafo, antes do texto.
+        _bloco_up_check = bloco.upper().lstrip().lstrip('*').lstrip()
+        if pilha_png and dados.get('tipo') == 'pilha' and _bloco_up_check.startswith('ADVERTÊNCIA:'):
+            _run_pilha = pb.add_run()
+            _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(0.9))
+            _tornar_imagem_flutuante_canto_superior_direito(_run_pilha, doc_pr_id=200)
+
         # Prefixos conhecidos: renderizados em TAM_PREFIXO (8,5pt) bold,
         # o restante do texto em TAM_CORPO (7pt) via markdown negrito normal.
         # Suporta texto armazenado como "ATENÇÃO: ..." ou "**ATENÇÃO:** ...".
@@ -4549,17 +4557,6 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         pbar.alignment = _alinhamento_ref_barras
         pbar.paragraph_format.space_after = _Pt(0)
         pbar.add_run().add_picture(_Bio(barcode_png), width=_Cm(LARG_BARRAS), height=_Cm(ALT_BARRAS))
-
-    # Imagem de pilha/bateria: flutuante "Frente ao Texto" (wrapNone) no lado DIREITO
-    # da coluna direita. ppilha é adicionado APÓS todo o texto de ATENÇÃO/INDICAÇÃO/
-    # ADVERTÊNCIA, portanto fica âncora no espaço vazio abaixo do texto — sem nada atrás.
-    if pilha_png and dados.get('tipo') == 'pilha':
-        ppilha = cell_dir.add_paragraph()
-        ppilha.paragraph_format.space_after = _Pt(0)
-        ppilha.paragraph_format.space_before = _Pt(0)
-        run_pilha = ppilha.add_run()
-        run_pilha.add_picture(_Bio(pilha_png), width=_Cm(0.9))
-        _tornar_imagem_flutuante_direita(run_pilha, doc_pr_id=200)
 
     # ---- RODAPÉ ----
     cell_rod = tabela.cell(1, 0).merge(tabela.cell(1, 1))
