@@ -4458,7 +4458,7 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
     add_linha(cell_esq, f"CNPJ: {dados['importador_cnpj']} / Origem: {dados['origem']}")
     p_qtd = add_linha(cell_esq, f"Quantidade: {dados['quantidade']}")
     _adicionar_borda_superior(p_qtd)
-    p_dtfab = add_linha(cell_esq, f"Data de Fabricação: {dados['data_fabricacao']} / Lote: {dados['lote']}")
+    p_dtfab = add_linha(cell_esq, f"Data de Fabricação: {dados['data_fabricacao']} / Lote: {dados['lote']}")
     _adicionar_borda_superior(p_dtfab)
     add_linha(cell_esq, "Data de validade: Indeterminado")
     add_linha(cell_esq, f"SAC: {dados['sac']}")
