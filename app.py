@@ -4480,7 +4480,7 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         # texto, senão a âncora calcula a partir do lugar errado.
         if _idx_bloco == 0 and chorao_png:
             _run_chorao = pb.add_run()
-            _run_chorao.add_picture(_Bio(chorao_png), width=_Cm(0.9))
+            _run_chorao.add_picture(_Bio(chorao_png), width=_Cm(0.95), height=_Cm(1.0))
             _tornar_imagem_flutuante_canto_superior_esquerdo(_run_chorao, LARG_COL)
 
         # Pilha/bateria: imagem FLUTUANTE ancorada no canto superior DIREITO
@@ -4490,13 +4490,13 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         _bloco_up_check = bloco.upper().lstrip().lstrip('*').lstrip()
         if pilha_png and dados.get('tipo') == 'pilha' and _bloco_up_check.startswith('ADVERTÊNCIA:'):
             _run_pilha = pb.add_run()
-            _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(0.9))
+            _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(0.95), height=_Cm(1.0))
             _tornar_imagem_flutuante_canto_superior_direito(_run_pilha, doc_pr_id=200)
 
         # Prefixos conhecidos: renderizados em TAM_PREFIXO (8,5pt) bold,
         # o restante do texto em TAM_CORPO (7pt) via markdown negrito normal.
         # Suporta texto armazenado como "ATENÇÃO: ..." ou "**ATENÇÃO:** ...".
-        _PREFIXOS = ('ATENÇÃO:', 'INDICAÇÃO:', 'ADVERTÊNCIA:',
+        _PREFIXOS = ('ATENÇÃO:', 'INDICAÇÃO:', 'ADVERTÊNCIA:', 'ADVERTÊNCIA!',
                      'CUIDADOS DE USO:', 'COMPOSIÇÃO:')
         _bloco_restante = bloco
         _achou_pref = False
@@ -12476,7 +12476,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                         for _j, _h in enumerate(_headers):
                             if nome in _h.upper(): return _j
                         return None
-                    _cols = {k: _ci(k) for k in ['REFERENCIA','MARCA','CÓDIGO DE BARRAS','NOME','FABRICA','FAMILIA','REGISTRO']}
+                    _cols = {k: _ci(k) for k in ['REFERENCIA','MARCA','CÓDIGO DE BARRAS','NOME','FABRICA','FAMILIA','REGISTRO','QTD']}
                     _itens = []
                     for _r in _rows[_idx+1:]:
                         _ref = _r[_cols['REFERENCIA']] if _cols['REFERENCIA'] is not None else None
@@ -12495,6 +12495,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             'fabrica': _get('FABRICA'),
                             'familia': _get('FAMILIA'),
                             'registro': _get('REGISTRO'),
+                            'qtd': _get('QTD'),
                         })
                     return _itens
 
@@ -12536,7 +12537,12 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 _variante = st.selectbox("Selo", _VARIANTES,
                                     format_func=lambda v: _VARIANTES_SELO_VALIDAS[v], key=f"variante_{_i}")
                             with cc3:
-                                _pecas = st.number_input("Peças", min_value=1, value=1, step=1, key=f"pecas_{_i}")
+                                _qtd_excel = _item.get('qtd', '')
+                                try:
+                                    _pecas_default = max(1, int(float(_qtd_excel))) if _qtd_excel else 1
+                                except (ValueError, TypeError):
+                                    _pecas_default = 1
+                                _pecas = st.number_input("Peças", min_value=1, value=_pecas_default, step=1, key=f"pecas_{_i}")
                             with cc4:
                                 _idade_num = st.number_input("Idade (nº)", min_value=0,
                                     value=(_idade_det['numero'] if _idade_det else 3), step=1, key=f"idadenum_{_i}")
