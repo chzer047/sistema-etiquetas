@@ -4353,9 +4353,11 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
 
     def _tornar_imagem_flutuante_direita(run, doc_pr_id=200):
         """Converte imagem de inline para âncora flutuante 'Frente ao Texto'
-        (wp:wrapNone) posicionada no canto DIREITO do parágrafo — para a imagem
-        de pilha/bateria aparecer discreta no lado direito da coluna, sem
-        empurrar o texto (fica sobreposta)."""
+        (wp:wrapNone) posicionada no canto DIREITO da coluna — para a imagem
+        de pilha/bateria aparecer discreta, sem empurrar o layout.
+        Valores de posOffset extraídos do docx de referência (etiquetas_35.docx):
+          positionH relativeFrom='column' posOffset=1666875 (≈4,63 cm da esquerda)
+          positionV relativeFrom='paragraph' posOffset=172085 (≈0,48 cm do topo)"""
         drawing = run._element.find(_qn('w:drawing'))
         inline = drawing.find(_qn('wp:inline'))
         filhos = {child.tag.split('}')[-1]: child for child in inline}
@@ -4365,8 +4367,8 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         graphic = filhos['graphic']
 
         anchor = _OxmlElement('wp:anchor')
-        for _attr, _val in [('distT', '0'), ('distB', '0'), ('distL', '0'), ('distR', '0'),
-                             ('simplePos', '0'), ('relativeHeight', str(251659264 + doc_pr_id)),
+        for _attr, _val in [('distT', '0'), ('distB', '0'), ('distL', '114300'), ('distR', '114300'),
+                             ('simplePos', '0'), ('relativeHeight', str(251658240 + doc_pr_id)),
                              ('behindDoc', '0'), ('locked', '0'), ('layoutInCell', '1'), ('allowOverlap', '1')]:
             anchor.set(_attr, _val)
 
@@ -4376,16 +4378,16 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
 
         positionH = _OxmlElement('wp:positionH')
         positionH.set('relativeFrom', 'column')
-        alignH = _OxmlElement('wp:align')
-        alignH.text = 'right'
-        positionH.append(alignH)
+        posOffH = _OxmlElement('wp:posOffset')
+        posOffH.text = '1666875'
+        positionH.append(posOffH)
         anchor.append(positionH)
 
         positionV = _OxmlElement('wp:positionV')
         positionV.set('relativeFrom', 'paragraph')
-        alignV = _OxmlElement('wp:align')
-        alignV.text = 'top'
-        positionV.append(alignV)
+        posOffV = _OxmlElement('wp:posOffset')
+        posOffV.text = '172085'
+        positionV.append(posOffV)
         anchor.append(positionV)
 
         anchor.append(extent)
@@ -4548,14 +4550,15 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         pbar.paragraph_format.space_after = _Pt(0)
         pbar.add_run().add_picture(_Bio(barcode_png), width=_Cm(LARG_BARRAS), height=_Cm(ALT_BARRAS))
 
-    # Imagem de pilha/bateria: flutuante "Frente ao Texto" no lado DIREITO da
-    # coluna direita — discreta (~1,8 cm), ancorada no parágrafo do bloco de texto.
+    # Imagem de pilha/bateria: flutuante "Frente ao Texto" (wrapNone) no lado DIREITO
+    # da coluna direita. ppilha é adicionado APÓS todo o texto de ATENÇÃO/INDICAÇÃO/
+    # ADVERTÊNCIA, portanto fica âncora no espaço vazio abaixo do texto — sem nada atrás.
     if pilha_png and dados.get('tipo') == 'pilha':
         ppilha = cell_dir.add_paragraph()
         ppilha.paragraph_format.space_after = _Pt(0)
         ppilha.paragraph_format.space_before = _Pt(0)
         run_pilha = ppilha.add_run()
-        run_pilha.add_picture(_Bio(pilha_png), width=_Cm(1.8))
+        run_pilha.add_picture(_Bio(pilha_png), width=_Cm(0.9))
         _tornar_imagem_flutuante_direita(run_pilha, doc_pr_id=200)
 
     # ---- RODAPÉ ----
@@ -4606,7 +4609,7 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
     buscado por fábrica+família, avisando se não bater com o Excel.
     cliente_base_registro: qual base usar pra buscar o registro (ex: 'BOLSA' ou o cliente escolhido)."""
     from docx import Document as _Doc
-    from docx.shared import Cm as _Cm
+    from docx.shared import Cm as _Cm, Pt as _Pt
     from io import BytesIO as _Bio
 
     avisos = []
@@ -4723,7 +4726,14 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
                                 chorao_png=chorao_para_esse, pilha_png=pilha_png_bytes if cfg['tipo']=="pilha" else None)
 
         if idx < len(itens_config) - 1:
-            doc.add_page_break()
+            if idx % 2 == 0:
+                # Primeira de um par: espaçador entre as duas etiquetas da página
+                p_sep = doc.add_paragraph()
+                p_sep.paragraph_format.space_after = _Pt(8)
+                p_sep.paragraph_format.space_before = _Pt(8)
+            else:
+                # Segunda de um par: quebra de página para o próximo par
+                doc.add_page_break()
 
     _buf_docx = _Bio()
     doc.save(_buf_docx)
