@@ -4490,7 +4490,7 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         _bloco_up_check = bloco.upper().lstrip().lstrip('*').lstrip()
         if pilha_png and dados.get('tipo') == 'pilha' and _bloco_up_check.startswith('ADVERTÊNCIA:'):
             _run_pilha = pb.add_run()
-            _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(0.95), height=_Cm(1.0))
+            _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(1.0), height=_Cm(0.95))
             _tornar_imagem_flutuante_canto_superior_direito(_run_pilha, doc_pr_id=200)
 
         # Prefixos conhecidos: renderizados em TAM_PREFIXO (8,5pt) bold,
