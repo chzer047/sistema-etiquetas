@@ -3517,6 +3517,133 @@ def importar_textos_padrao_seed():
     return inseridos, len(_TEXTOS_PADRAO_SEED) - inseridos
 
 
+def _extrair_textos_do_docx_sync(docx_bytes):
+    """Lê um .docx e extrai blocos de texto reconhecíveis (ATENÇÃO/INDICAÇÃO/etc.),
+    preservando negrito como **...** e tentando detectar o tipo de etiqueta pelos
+    cabeçalhos/seções do documento. Retorna lista de dicts com tipo/categoria/conteudo."""
+    from docx import Document
+    from io import BytesIO as _Bio
+
+    _CATS = ['CUIDADOS DE USO', 'COMPOSIÇÃO', 'ADVERTÊNCIA', 'ADVERTENCIA',
+             'ATENÇÃO', 'ATENCAO', 'INDICAÇÃO', 'INDICACAO', 'RESTRITIVO']
+    _TIPO_KEYWORDS = {
+        'pilha': ['PILHA', 'BATERIA', 'C/ PILHA', 'COM PILHA'],
+        'maquiagem': ['MAQUIAGEM', 'MAKE UP', 'MAKE-UP'],
+        'massa': ['MASSA DE MODELAR', 'MASSA MODELAR', 'MODELAR'],
+    }
+
+    def _para_fmt(para):
+        """Parágrafo → string com bold como **...**"""
+        out = ''
+        for run in para.runs:
+            txt = run.text
+            if not txt:
+                continue
+            if run.bold:
+                out += f'**{txt}**'
+            else:
+                out += txt
+        return out.strip()
+
+    def _detectar_categoria(texto):
+        t = texto.upper().replace('**', '')
+        for cat in _CATS:
+            if t.startswith(cat):
+                return cat.replace('ATENCAO', 'ATENÇÃO').replace('INDICACAO', 'INDICAÇÃO').replace('ADVERTENCIA', 'ADVERTÊNCIA')
+        return None
+
+    def _detectar_tipo_from_header(texto):
+        t = texto.upper()
+        for tipo, kws in _TIPO_KEYWORDS.items():
+            for kw in kws:
+                if kw in t:
+                    return tipo
+        return None
+
+    try:
+        doc = Document(_Bio(docx_bytes))
+    except Exception as e:
+        return [], str(e)
+
+    textos = []
+    tipo_atual = 'padrao'
+
+    def _processar_paragrafos(paras):
+        nonlocal tipo_atual
+        for para in paras:
+            texto_fmt = _para_fmt(para)
+            texto_plano = para.text.strip()
+            if not texto_plano:
+                continue
+            # Verifica se é cabeçalho de seção que indica o tipo
+            estilo = (para.style.name or '').lower()
+            eh_header = 'heading' in estilo or 'title' in estilo
+            tipo_det = _detectar_tipo_from_header(texto_plano)
+            if tipo_det and (eh_header or len(texto_plano) < 80):
+                tipo_atual = tipo_det
+                continue
+            # Reset para padrao se aparecer header sem tipo específico
+            if eh_header and not tipo_det:
+                tipo_atual = 'padrao'
+                continue
+            cat = _detectar_categoria(texto_fmt or texto_plano)
+            if cat:
+                textos.append({
+                    'tipo': tipo_atual,
+                    'categoria': cat,
+                    'conteudo': texto_fmt or texto_plano,
+                })
+
+    _processar_paragrafos(doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                _processar_paragrafos(cell.paragraphs)
+
+    return textos, None
+
+
+def sincronizar_textos_do_word(docx_bytes):
+    """Compara textos extraídos do .docx com o banco e executa o merge:
+      - Novo (não existe no banco) → INSERT
+      - Igual (conteúdo idêntico normalizado) → ignora
+      - Mudou (mesmo título no banco, conteúdo diferente) → UPDATE
+    Retorna dicts: inseridos, atualizados, ignorados, erros."""
+    import unicodedata
+
+    def _norm(s):
+        s = unicodedata.normalize('NFC', str(s))
+        return re.sub(r'\s+', ' ', s.replace('**', '')).strip().upper()
+
+    textos_word, erro_parse = _extrair_textos_do_docx_sync(docx_bytes)
+    if erro_parse:
+        return [], [], [], [f"Erro ao abrir o arquivo: {erro_parse}"]
+
+    df_db = pd.read_sql_query(
+        "SELECT id, tipo, categoria, titulo, conteudo FROM textos_etiqueta", conn
+    )
+    db_por_conteudo_norm = {_norm(r['conteudo']): r for _, r in df_db.iterrows()}
+
+    inseridos = []
+    ignorados = []
+
+    for item in textos_word:
+        norm_item = _norm(item['conteudo'])
+        if norm_item in db_por_conteudo_norm:
+            ignorados.append({**item, 'match': db_por_conteudo_norm[norm_item]['titulo']})
+            continue
+        # Texto novo — gera um título automático
+        cat = item['categoria']
+        conteudo_plano = re.sub(r'\*+', '', item['conteudo'])
+        titulo_auto = f"{cat[:20]} — {conteudo_plano[len(cat):].strip()[:60]}".strip(' —')
+        salvar_texto_etiqueta(
+            item['categoria'], titulo_auto, item['conteudo'], tipo=item['tipo']
+        )
+        inseridos.append({**item, 'titulo_gerado': titulo_auto})
+
+    return inseridos, ignorados
+
+
 # ---- Modelos-Word de selo (4 variantes fixas, número de registro editável) ----
 
 _VARIANTES_SELO_VALIDAS = {
@@ -12847,6 +12974,47 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                 st.success(f"✅ {_inseridos} texto(s) importado(s). {_ja_existiam} já existiam e foram ignorados.")
                 st.cache_data.clear()
                 st.rerun()
+
+        with st.expander("🔄 Sincronizar com arquivo Word atualizado (.docx)", expanded=False):
+            st.caption(
+                "Faça upload do arquivo Word com os modelos de etiqueta atualizados. "
+                "O sistema compara cada texto com o banco: "
+                "**novo** → insere automaticamente; **idêntico** → ignora; "
+                "**ausente no arquivo** → mantém no banco (nada é deletado)."
+            )
+            _sync_file = st.file_uploader(
+                "Selecione o arquivo .docx atualizado",
+                type=["docx"],
+                key="upload_sync_textos_docx"
+            )
+            if _sync_file:
+                _sync_file.seek(0)
+                _sync_bytes = _sync_file.read()
+                # Pré-visualiza o que foi encontrado no arquivo
+                _textos_preview, _err_prev = _extrair_textos_do_docx_sync(_sync_bytes)
+                if _err_prev:
+                    st.error(f"Não foi possível ler o arquivo: {_err_prev}")
+                elif not _textos_preview:
+                    st.warning("Nenhum bloco de texto reconhecível encontrado no arquivo (ATENÇÃO/INDICAÇÃO/ADVERTÊNCIA/etc.).")
+                else:
+                    st.success(f"Arquivo lido — {len(_textos_preview)} bloco(s) de texto encontrado(s).")
+                    with st.expander("Ver textos encontrados no arquivo", expanded=False):
+                        for _tp in _textos_preview:
+                            st.markdown(f"**[{_tp['tipo']} / {_tp['categoria']}]** {_tp['conteudo'][:120]}{'...' if len(_tp['conteudo']) > 120 else ''}")
+
+                    if st.button("▶️ Executar sincronização agora", key="btn_executar_sync_textos"):
+                        _sync_file.seek(0)
+                        _ins, _ign = sincronizar_textos_do_word(_sync_file.read())
+                        st.cache_data.clear()
+                        if _ins:
+                            st.success(f"✅ {len(_ins)} texto(s) novo(s) inserido(s):")
+                            for _i in _ins:
+                                st.markdown(f"- **[{_i['tipo']} / {_i['categoria']}]** {_i['titulo_gerado']}")
+                        if _ign:
+                            st.info(f"ℹ️ {len(_ign)} texto(s) já existiam no banco e foram ignorados.")
+                        if not _ins and not _ign:
+                            st.info("Nenhuma alteração necessária.")
+                        st.rerun()
 
         st.info("💡 **Como marcar negrito:** coloque o trecho entre dois asteriscos de cada lado. Ex: `**ATENÇÃO:** não recomendável...` — na etiqueta gerada, 'ATENÇÃO:' fica em negrito e os asteriscos somem.")
 
