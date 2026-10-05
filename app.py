@@ -4265,12 +4265,12 @@ def selo_docx_para_png(selo_docx_bytes, soffice_path, coletar_erro=None):
     return _selo_docx_para_png_metodo_antigo(selo_docx_bytes, soffice_path, coletar_erro=coletar_erro)
 
 
-def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, pilha_png=None):
+def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, pilha_png=None, variante_selo=None):
     """Monta uma etiqueta (tabela 2 colunas) dentro do documento `doc`.
     Medidas extraídas do padrão real da empresa:
     - Fonte Arial 7pt (corpo), 8,5pt (prefixo ATENÇÃO/INDICAÇÃO/ADVERTÊNCIA e rodapé), 8pt (referência/nome)
     - Etiqueta 11.48cm de largura total (2 colunas de ~5.74cm)
-    - Selo 5.54cm × 2.5cm, código de barras 5.34cm de largura"""
+    - Selo padrão 5.54cm × 2.5cm; selos compactos 2.0cm × 2.0cm; código de barras 5.34cm de largura"""
     from docx.shared import Pt as _Pt, Cm as _Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH as _ALIGN
     from docx.enum.table import WD_ALIGN_VERTICAL as _VALIGN
@@ -4283,8 +4283,9 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
     TAM_PREFIXO = 8.5  # prefixo "ATENÇÃO:" / "INDICAÇÃO:" / "ADVERTÊNCIA:" e rodapé
     TAM_REF = 8        # referência/nome
     LARG_COL = 5.74    # cada coluna (total 11.48cm)
-    LARG_SELO = 5.54   # largura do selo (padrão real: 5,54cm)
-    ALT_SELO = 2.5     # altura do selo (padrão real: 2,5cm)
+    _compacto = variante_selo in ("compacto_cor", "compacto_pb")
+    LARG_SELO = 2.0 if _compacto else 5.54
+    ALT_SELO  = 2.0 if _compacto else 2.5
     LARG_BARRAS = 5.34 # largura do código de barras
     ALT_BARRAS = 2.24  # altura — proporção 2,39:1 (medida do codigo_de_barras.docx)
 
@@ -4727,7 +4728,8 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
         }
 
         _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png,
-                                chorao_png=chorao_para_esse, pilha_png=pilha_png_bytes if cfg['tipo']=="pilha" else None)
+                                chorao_png=chorao_para_esse, pilha_png=pilha_png_bytes if cfg['tipo']=="pilha" else None,
+                                variante_selo=cfg['variante'])
 
         if idx < len(itens_config) - 1:
             if idx % 2 == 0:
