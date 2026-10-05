@@ -4354,6 +4354,9 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
     def _tornar_imagem_flutuante_canto_superior_direito(run, doc_pr_id=200):
         """Espelho do chorão: âncora flutuante no canto superior DIREITO da coluna,
         wrapSquare wrapText="left" — o texto de ADVERTÊNCIA flui à esquerda da imagem.
+        Valores de posOffset extraídos do docx de referência (etiquetas_39_correto.docx):
+          positionH relativeFrom='column' posOffset=1616186 (≈4,49 cm da esquerda)
+          positionV relativeFrom='paragraph' posOffset=157480 (≈0,44 cm do topo)
         Precisa ser o PRIMEIRO run do parágrafo (antes do texto)."""
         drawing = run._element.find(_qn('w:drawing'))
         inline = drawing.find(_qn('wp:inline'))
@@ -4365,7 +4368,7 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
 
         anchor = _OxmlElement('wp:anchor')
         for _attr, _val in [('distT', '0'), ('distB', '0'), ('distL', '0'), ('distR', '114300'),
-                             ('simplePos', '0'), ('relativeHeight', str(251659264 + doc_pr_id)),
+                             ('simplePos', '0'), ('relativeHeight', str(251658240 + doc_pr_id)),
                              ('behindDoc', '0'), ('locked', '0'), ('layoutInCell', '1'), ('allowOverlap', '1')]:
             anchor.set(_attr, _val)
 
@@ -4375,16 +4378,16 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
 
         positionH = _OxmlElement('wp:positionH')
         positionH.set('relativeFrom', 'column')
-        alignH = _OxmlElement('wp:align')
-        alignH.text = 'right'
-        positionH.append(alignH)
+        posOffH = _OxmlElement('wp:posOffset')
+        posOffH.text = '1616186'
+        positionH.append(posOffH)
         anchor.append(positionH)
 
         positionV = _OxmlElement('wp:positionV')
         positionV.set('relativeFrom', 'paragraph')
-        alignV = _OxmlElement('wp:align')
-        alignV.text = 'top'
-        positionV.append(alignV)
+        posOffV = _OxmlElement('wp:posOffset')
+        posOffV.text = '157480'
+        positionV.append(posOffV)
         anchor.append(positionV)
 
         anchor.append(extent)
