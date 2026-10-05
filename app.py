@@ -12709,6 +12709,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             _idade_det = detectar_idade_do_nome(_item['nome'])
                             _tem_pilha_det = detectar_tem_pilha_do_nome(_item['nome'])
                             _tipo_sugerido = "pilha" if _tem_pilha_det else "padrao"
+                            _is_18m = bool(re.search(r'\+\s*18\s*M[EÊ]S', str(_item.get('nome', '')).upper()))
 
                             with st.expander(f"{_ref_curta} — {_nome_curto[:50]}", expanded=(_i < 3)):
                                 cc1, cc2, cc3, cc4 = st.columns(4)
@@ -12746,9 +12747,14 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         else:
                                             _opcoes_df = _df_textos_todos
                                         _opcoes = [_NENHUM_TEXTO] + list(_opcoes_df['titulo'])
+                                        # +18m sem pilha → ATENÇÃO fica vazia por padrão
+                                        _aten_18m_sem_pilha = (_cat == 'ATENÇÃO' and _is_18m and not _tem_pilha_det)
+                                        _default_idx = 0 if _aten_18m_sem_pilha else (1 if len(_opcoes) > 1 else 0)
                                         st.selectbox(_cat.title(), _opcoes,
-                                            index=(1 if len(_opcoes) > 1 else 0),
+                                            index=_default_idx,
                                             key=f"txt_{_i}_{_cat}")
+                                        if _aten_18m_sem_pilha:
+                                            st.caption("ℹ️ +18m sem pilha: ATENÇÃO deixada em branco automaticamente.")
                                 if not _categorias_deste_tipo:
                                     st.caption("Esse tipo não usa textos de ATENÇÃO/INDICAÇÃO configuráveis.")
 
