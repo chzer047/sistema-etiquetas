@@ -12606,18 +12606,26 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                     chorao_png_bytes=_chorao_bytes, pilha_png_bytes=_pilha_bytes
                                 )
                             if _resultado and _resultado.get('docx'):
-                                st.success("✅ Etiquetas geradas!")
-                                st.download_button("⬇️ Baixar Word (.docx)", _resultado['docx'],
-                                    "etiquetas.docx",
-                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    key="dl_etiq_docx")
-                                st.caption("Pra ter em PDF: abra o Word e use 'Salvar como PDF'.")
-                                if _resultado.get('avisos'):
-                                    st.markdown("**Avisos:**")
-                                    for _av in _resultado['avisos'][:40]:
-                                        st.warning(_av)
+                                st.session_state['etiq_docx_bytes'] = _resultado['docx']
+                                st.session_state['etiq_avisos'] = _resultado.get('avisos', [])
+                                st.success("✅ Etiquetas geradas! Clique em Baixar abaixo.")
                             else:
+                                st.session_state.pop('etiq_docx_bytes', None)
                                 st.error("Não foi possível gerar as etiquetas.")
+
+                    # Download fora do if st.button para sobreviver ao re-run do Streamlit
+                    if st.session_state.get('etiq_docx_bytes'):
+                        st.download_button("⬇️ Baixar Word (.docx)",
+                            st.session_state['etiq_docx_bytes'],
+                            "etiquetas.docx",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key="dl_etiq_docx")
+                        st.caption("Pra ter em PDF: abra o Word e use 'Salvar como PDF'.")
+                        _avisos_etiq = st.session_state.get('etiq_avisos', [])
+                        if _avisos_etiq:
+                            st.markdown("**Avisos:**")
+                            for _av in _avisos_etiq[:40]:
+                                st.warning(_av)
 
     with tab_clientes:
         st.subheader("Cadastro de clientes (importadores)")
