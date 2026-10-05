@@ -12628,16 +12628,57 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 st.warning(_av)
 
     with tab_clientes:
-        st.subheader("Cadastro de clientes (importadores)")
-        st.caption("Preencha manualmente conforme o cartão CNPJ. Esses dados vão no lado esquerdo da etiqueta (Importador, CNPJ, endereço, SAC, Origem). Tudo editável — se o cliente mudar algo, é só atualizar aqui.")
+        st.subheader("Clientes / Importadores")
+        st.caption("Dados que vão no lado esquerdo da etiqueta (Importador, CNPJ, endereço, SAC). Preencha conforme o cartão CNPJ.")
 
         _clientes_existentes = listar_clientes_etiqueta()
+
+        # --- Tabela com botões de editar ---
+        if not _clientes_existentes.empty:
+            st.markdown("**Clientes cadastrados — clique em ✏️ para editar:**")
+            for _, _row_cli in _clientes_existentes.iterrows():
+                _col_info, _col_btn = st.columns([5, 1])
+                with _col_info:
+                    st.markdown(
+                        f"**{_row_cli['apelido']}** — {_row_cli['razao_social'] or '—'} | "
+                        f"CNPJ: {_row_cli['cnpj'] or '—'}"
+                    )
+                    if _row_cli.get('endereco'):
+                        st.caption(_row_cli['endereco'])
+                with _col_btn:
+                    if st.button("✏️ Editar", key=f"btn_editar_cli_{_row_cli['id']}"):
+                        st.session_state['cli_editar_apelido'] = _row_cli['apelido']
+                        st.rerun()
+            st.divider()
+
+        # --- Formulário: novo ou editar ---
         _opcoes_edit = ["➕ Novo cliente"] + (_clientes_existentes["apelido"].tolist() if not _clientes_existentes.empty else [])
-        _escolha_cliente = st.selectbox("Cliente", _opcoes_edit, key="sel_cliente_etiqueta_edit")
+
+        # Se veio de um clique em ✏️, pré-seleciona o cliente
+        _sel_idx = 0
+        _pre_sel = st.session_state.get('cli_editar_apelido', '')
+        if _pre_sel and _pre_sel in _opcoes_edit:
+            _sel_idx = _opcoes_edit.index(_pre_sel)
+
+        _escolha_cliente = st.selectbox(
+            "Selecione um cliente para editar, ou '➕ Novo cliente' para cadastrar:",
+            _opcoes_edit, index=_sel_idx, key="sel_cliente_etiqueta_edit"
+        )
+
+        # Limpa o pré-select depois de usado
+        if _pre_sel and _escolha_cliente == _pre_sel:
+            st.session_state.pop('cli_editar_apelido', None)
 
         _dados_edit = None
-        if _escolha_cliente != "➕ Novo cliente":
+        _modo_edicao = _escolha_cliente != "➕ Novo cliente"
+        if _modo_edicao:
             _dados_edit = buscar_cliente_etiqueta(_escolha_cliente)
+
+        # Banner de modo
+        if _modo_edicao:
+            st.info(f"✏️ **Modo edição** — cliente: **{_escolha_cliente}**. Altere os campos abaixo e clique em 'Atualizar'.")
+        else:
+            st.success("➕ **Novo cliente** — preencha os dados abaixo e clique em 'Cadastrar'.")
 
         col_c1, col_c2 = st.columns(2)
         with col_c1:
@@ -12647,11 +12688,12 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
         with col_c2:
             _endereco = st.text_area("Endereço completo", value=(_dados_edit["endereco"] if _dados_edit else ""), placeholder="Rua, nº, sala, bairro, cidade - UF, CEP", height=100, key="cli_endereco")
             _sac = st.text_input("SAC (email)", value=(_dados_edit["sac"] if _dados_edit else ""), placeholder="Ex: atefcomercio@outlook.com", key="cli_sac")
-            st.caption("ℹ️ A Origem (ex: CHINA) é perguntada na hora de gerar a etiqueta, não aqui — porque pode variar de um lote pra outro do mesmo cliente.")
+            st.caption("ℹ️ A Origem (ex: CHINA) é perguntada na hora de gerar a etiqueta, não aqui — pode variar de lote pra lote.")
 
         col_b1, col_b2 = st.columns([1, 1])
         with col_b1:
-            if st.button("💾 Salvar cliente", key="salvar_cliente_etiqueta", type="primary"):
+            _btn_label = "💾 Atualizar cliente" if _modo_edicao else "💾 Cadastrar cliente"
+            if st.button(_btn_label, key="salvar_cliente_etiqueta", type="primary"):
                 if not (clean(_apelido) and clean(_razao) and clean(_cnpj)):
                     st.error("Preencha ao menos Apelido, Razão social e CNPJ.")
                 else:
@@ -12660,20 +12702,18 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                         (_dados_edit["origem"] if _dados_edit else ""),
                         id_existente=(_dados_edit["id"] if _dados_edit else None)
                     )
-                    st.success(f"Cliente '{_apelido}' salvo ✅")
+                    _msg_ok = f"Cliente '{_apelido}' atualizado ✅" if _modo_edicao else f"Cliente '{_apelido}' cadastrado ✅"
+                    st.success(_msg_ok)
+                    st.session_state.pop('cli_editar_apelido', None)
                     st.cache_data.clear()
                     st.rerun()
         with col_b2:
             if _dados_edit and st.button("🗑️ Excluir este cliente", key="excluir_cliente_etiqueta"):
                 excluir_cliente_etiqueta(_dados_edit["id"])
                 st.success("Cliente excluído ✅")
+                st.session_state.pop('cli_editar_apelido', None)
                 st.cache_data.clear()
                 st.rerun()
-
-        if not _clientes_existentes.empty:
-            st.divider()
-            st.markdown("**Clientes cadastrados:**")
-            st.dataframe(normalizar_df_para_exibicao(_clientes_existentes), use_container_width=True)
 
     with tab_selos:
         st.subheader("Modelos de selo (Word editável)")
