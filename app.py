@@ -3365,6 +3365,39 @@ def detectar_tem_pilha_do_nome(nome):
     return bool(re.search(r'PILHA|BATERIA|À PILHA|A PILHA', str(nome).upper()))
 
 
+def detectar_chorao_18m(nome, tem_corda=False):
+    """Retorna qual chorão usar para este item:
+      'chorao18' — usa o ícone -18 meses
+      'chorao'   — usa o ícone -3 anos (padrão)
+      None       — nenhum chorão
+
+    Regras:
+      1. Se NOME contém '+18MESES' ou '+18 MESES' (indicativo):
+         a. E contém 'RESTRITIVO -18' ou 'RESTRIÇÃO -18' ou 'RESTRITIVO -18MESES':
+            → 'chorao18' (independente de corda)
+         b. E contém 'SEM RESTRIÇÃO' E tem_corda=True:
+            → 'chorao18'
+         c. E contém 'SEM RESTRIÇÃO' E tem_corda=False:
+            → None (sem chorão — produto +18m sem corda, sem restrição)
+      2. Caso contrário (produto de anos), retorna None aqui —
+         a lógica de chorão de 3 anos já é tratada pelo campo idade_uni='ANOS'.
+    """
+    if not nome:
+        return None
+    n = str(nome).upper()
+    is_18m = bool(re.search(r'\+\s*18\s*M[EÊ]S', n))
+    if not is_18m:
+        return None
+    # Tem restritivo -18 explícito → chorão 18m sempre
+    if re.search(r'RESTRIT\w*\s*-\s*18|RESTRI[ÇC][ÃA]O\s*-\s*18', n):
+        return 'chorao18'
+    # Sem restrição: só coloca se tiver corda
+    if 'SEM RESTRI' in n:
+        return 'chorao18' if tem_corda else None
+    # +18m sem indicação clara de "sem restrição" — trata como restritivo
+    return 'chorao18'
+
+
 def separar_referencia_nome(texto_referencia):
     """Separa 'KK-1827 - BRINQUEDO MÓBILE DE PLÁSTICO' em:
     ('KK-1827', 'BRINQUEDO MÓBILE DE PLÁSTICO'). Limpa apóstrofo inicial."""
@@ -4609,7 +4642,8 @@ def _montar_textos_direita(tipo, idade_formatada, titulos_escolhidos, textos_por
 
 
 def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_fab, lote,
-                          cliente_base_registro, chorao_png_bytes=None, pilha_png_bytes=None):
+                          cliente_base_registro, chorao_png_bytes=None, pilha_png_bytes=None,
+                          chorao18_png_bytes=None):
     """Gera o Word com todas as etiquetas. O registro vem da BASE (tabela registros),
     buscado por fábrica+família, avisando se não bater com o Excel.
     cliente_base_registro: qual base usar pra buscar o registro (ex: 'BOLSA' ou o cliente escolhido)."""
@@ -4703,10 +4737,16 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
         if aviso_bc:
             avisos.append(f"Item {ref_curta}: {aviso_bc}")
 
-        # Chorão: entra se for produto restritivo (-3 anos / idade em anos <= 3 tipicamente)
-        # Regra: usa o chorão quando a idade detectada for em ANOS (indicativo +3 = restritivo -3)
-        usar_chorao = (cfg.get('idade_uni') == "ANOS")
-        chorao_para_esse = chorao_png_bytes if usar_chorao else None
+        # Chorão: determina qual (3 anos, 18 meses, ou nenhum) pelo nome e coluna CORDA
+        _tem_corda = bool(item.get('corda', False))
+        _tipo_chorao = detectar_chorao_18m(item.get('nome', ''), tem_corda=_tem_corda)
+        if _tipo_chorao == 'chorao18':
+            chorao_para_esse = chorao18_png_bytes
+        elif cfg.get('idade_uni') == "ANOS":
+            # Produto de anos (não +18m): usa chorão -3 anos padrão
+            chorao_para_esse = chorao_png_bytes
+        else:
+            chorao_para_esse = None
 
         textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave)
 
@@ -12489,7 +12529,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                         for _j, _h in enumerate(_headers):
                             if nome in _h.upper(): return _j
                         return None
-                    _cols = {k: _ci(k) for k in ['REFERENCIA','MARCA','CÓDIGO DE BARRAS','NOME','FABRICA','FAMILIA','REGISTRO','QTD']}
+                    _cols = {k: _ci(k) for k in ['REFERENCIA','MARCA','CÓDIGO DE BARRAS','NOME','FABRICA','FAMILIA','REGISTRO','QTD','CORDA']}
                     _itens = []
                     for _r in _rows[_idx+1:]:
                         _ref = _r[_cols['REFERENCIA']] if _cols['REFERENCIA'] is not None else None
@@ -12500,6 +12540,8 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             if _ci_ is None or _ci_ >= len(_r): return ""
                             _v = _r[_ci_]
                             return str(_v).strip() if _v is not None else ""
+                        _corda_val = _get('CORDA').upper()
+                        _tem_corda = _corda_val in ('X', 'S', 'SIM', '1', 'TRUE', 'Y', 'YES')
                         _itens.append({
                             'referencia_full': _get('REFERENCIA'),
                             'marca': _get('MARCA'),
@@ -12509,6 +12551,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             'familia': _get('FAMILIA'),
                             'registro': _get('REGISTRO'),
                             'qtd': _get('QTD'),
+                            'corda': _tem_corda,
                         })
                     return _itens
 
@@ -12608,12 +12651,14 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                     })
                                 _chorao_bytes, _ = buscar_asset_generico("chorao")
                                 _pilha_bytes, _ = buscar_asset_generico("pilha")
+                                _chorao18_bytes, _ = buscar_asset_generico("chorao18")
 
                                 with st.spinner("Gerando etiquetas... (a conversão dos selos pode levar um tempo)"):
                                     _resultado = _gerar_lote_etiquetas(
                                         _itens_config, _cli, _origem_gerar, _solicitante_cnpj,
                                         _data_fab_gerar, _lote_gerar, _cliente_base_reg,
-                                        chorao_png_bytes=_chorao_bytes, pilha_png_bytes=_pilha_bytes
+                                        chorao_png_bytes=_chorao_bytes, pilha_png_bytes=_pilha_bytes,
+                                        chorao18_png_bytes=_chorao18_bytes
                                     )
                                 if _resultado and _resultado.get('docx'):
                                     st.session_state['etiq_docx_bytes'] = _resultado['docx']
@@ -12863,36 +12908,52 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
 
     with tab_genericos:
         st.subheader("Imagens genéricas reaproveitáveis")
-        st.caption("Essas imagens são as mesmas em qualquer etiqueta (não mudam por cliente/fábrica) — cadastra uma vez só e o sistema reaproveita sempre que aplicável (chorão em produtos -3 anos, pilha em produtos com PILHA no nome).")
+        st.caption("Essas imagens são as mesmas em qualquer etiqueta (não mudam por cliente/fábrica) — cadastra uma vez só e o sistema reaproveita sempre que aplicável.")
 
-        col_gen1, col_gen2 = st.columns(2)
+        col_gen1, col_gen2, col_gen3 = st.columns(3)
 
         with col_gen1:
-            st.markdown("**Imagem do chorão** (ícone -3 anos)")
+            st.markdown("**Chorão -3 anos**")
+            st.caption("Usado em produtos com indicativo em ANOS.")
             chorao_atual_bytes, chorao_atual_nome = buscar_asset_generico("chorao")
             if chorao_atual_bytes:
-                st.image(chorao_atual_bytes, caption=f"Atual: {chorao_atual_nome}", width=150)
+                st.image(chorao_atual_bytes, caption=f"Atual: {chorao_atual_nome}", width=120)
             else:
-                st.info("Nenhuma imagem de chorão cadastrada ainda.")
-
-            novo_chorao = st.file_uploader("Enviar/substituir imagem do chorão", type=["jpg", "jpeg", "png"], key="upload_chorao_generico")
-            if novo_chorao and st.button("💾 Salvar imagem do chorão", key="salvar_chorao_generico"):
+                st.info("Não cadastrado.")
+            novo_chorao = st.file_uploader("Enviar/substituir", type=["jpg", "jpeg", "png"], key="upload_chorao_generico")
+            if novo_chorao and st.button("💾 Salvar", key="salvar_chorao_generico"):
                 novo_chorao.seek(0)
                 salvar_asset_generico("chorao", novo_chorao.read(), novo_chorao.name)
-                st.success("Imagem do chorão salva ✅")
+                st.success("Chorão -3 anos salvo ✅")
                 st.cache_data.clear()
                 st.rerun()
 
         with col_gen2:
-            st.markdown("**Imagem de pilha/bateria**")
+            st.markdown("**Chorão -18 meses**")
+            st.caption("Usado em +18m c/ corda, ou +18m c/ restritivo -18m.")
+            chorao18_atual_bytes, chorao18_atual_nome = buscar_asset_generico("chorao18")
+            if chorao18_atual_bytes:
+                st.image(chorao18_atual_bytes, caption=f"Atual: {chorao18_atual_nome}", width=120)
+            else:
+                st.info("Não cadastrado.")
+            novo_chorao18 = st.file_uploader("Enviar/substituir", type=["jpg", "jpeg", "png"], key="upload_chorao18_generico")
+            if novo_chorao18 and st.button("💾 Salvar", key="salvar_chorao18_generico"):
+                novo_chorao18.seek(0)
+                salvar_asset_generico("chorao18", novo_chorao18.read(), novo_chorao18.name)
+                st.success("Chorão -18 meses salvo ✅")
+                st.cache_data.clear()
+                st.rerun()
+
+        with col_gen3:
+            st.markdown("**Pilha/bateria**")
+            st.caption("Usado em produtos com PILHA ou BATERIA no nome.")
             pilha_atual_bytes, pilha_atual_nome = buscar_asset_generico("pilha")
             if pilha_atual_bytes:
-                st.image(pilha_atual_bytes, caption=f"Atual: {pilha_atual_nome}", width=150)
+                st.image(pilha_atual_bytes, caption=f"Atual: {pilha_atual_nome}", width=120)
             else:
-                st.info("Nenhuma imagem de pilha/bateria cadastrada ainda.")
-
-            nova_pilha = st.file_uploader("Enviar/substituir imagem de pilha/bateria", type=["jpg", "jpeg", "png"], key="upload_pilha_generico")
-            if nova_pilha and st.button("💾 Salvar imagem de pilha/bateria", key="salvar_pilha_generico"):
+                st.info("Não cadastrado.")
+            nova_pilha = st.file_uploader("Enviar/substituir", type=["jpg", "jpeg", "png"], key="upload_pilha_generico")
+            if nova_pilha and st.button("💾 Salvar", key="salvar_pilha_generico"):
                 nova_pilha.seek(0)
                 salvar_asset_generico("pilha", nova_pilha.read(), nova_pilha.name)
                 st.success("Imagem de pilha/bateria salva ✅")
