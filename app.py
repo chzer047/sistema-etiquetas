@@ -24,6 +24,7 @@ from openpyxl import load_workbook
 
 st.set_page_config(
     page_title="C XML BR Engine",
+    page_icon="🏷️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -3112,6 +3113,7 @@ def atualizar_registro_selo(cliente_base, fabrica, familia, registro):
     commit_seguro()
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def listar_selos_registro():
     return pd.read_sql_query("""
     SELECT id, cliente_base, fabrica, familia, registro,
@@ -3412,6 +3414,7 @@ def salvar_texto_etiqueta(categoria, titulo, conteudo, tipo="padrao", id_existen
     commit_seguro()
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def listar_textos_etiqueta(tipo=None, categoria=None):
     """Lista textos cadastrados. Filtra por tipo e/ou categoria quando informado."""
     query = "SELECT id, tipo, categoria, titulo, conteudo, data_atualizacao FROM textos_etiqueta"
@@ -3523,6 +3526,7 @@ def salvar_modelo_selo(variante, docx_bytes, nome_arquivo):
     return registro_exemplo
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def buscar_modelo_selo(variante):
     row = cursor.execute(
         "SELECT arquivo_docx, nome_arquivo, registro_exemplo FROM modelos_selo WHERE variante = ?",
@@ -4766,6 +4770,7 @@ def salvar_cliente_etiqueta(apelido, razao_social, cnpj, endereco, sac, origem, 
     commit_seguro()
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def listar_clientes_etiqueta():
     return pd.read_sql_query("""
     SELECT id, apelido, razao_social, cnpj, endereco, sac, origem, data_atualizacao
@@ -4795,6 +4800,7 @@ def buscar_registro_por_fabrica_familia(cliente_base, fabrica, familia):
     return None
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def listar_clientes_base_registros():
     """Lista os clientes distintos cadastrados na tabela registros."""
     rows = cursor.execute("""
@@ -4942,6 +4948,7 @@ def salvar_asset_generico(tipo, imagem_bytes, nome_arquivo):
     commit_seguro()
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def buscar_asset_generico(tipo):
     tipo = clean(tipo).lower()
     row = cursor.execute("""
@@ -4952,6 +4959,7 @@ def buscar_asset_generico(tipo):
     return row[0], row[1]
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def listar_assets_genericos():
     return pd.read_sql_query("""
     SELECT tipo, nome_arquivo, largura, altura, data_cadastro, data_atualizacao
@@ -6111,7 +6119,6 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
     return total
 
 
-@st.cache_data(ttl=60, show_spinner=False)
 @st.cache_data(ttl=60, show_spinner=False)
 def buscar_item_sistema5_confirmacao(valor_ref, _debug_ref=None):
     """_debug_ref: se igual a valor_ref (após limpeza), imprime diagnóstico
@@ -12381,55 +12388,56 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
         st.subheader("Gerar etiquetas a partir do Excel")
         st.caption("Suba o mesmo Packing List (Excel) que você usa na conferência. O sistema lê os itens e monta as etiquetas.")
 
-        # ETAPA 1: dados gerais da geração
-        st.markdown("##### 1️⃣ Dados gerais")
         _clientes_disp = listar_clientes_etiqueta()
         if _clientes_disp.empty:
             st.warning("Nenhum cliente cadastrado. Cadastre um cliente na aba '👤 Clientes' antes de gerar.")
         else:
-            colg1, colg2, colg3 = st.columns(3)
-            with colg1:
-                _cliente_gerar = st.selectbox("Cliente (importador)", _clientes_disp["apelido"].tolist(), key="gerar_cliente")
-            with colg2:
-                _origem_gerar = st.text_input("Origem", value="CHINA", key="gerar_origem")
-            with colg3:
-                _com_solicitante = st.radio("Tem solicitante?", ["Não", "Sim"], horizontal=True, key="gerar_tem_solic")
+            with st.container(border=True):
+                st.markdown("##### 1️⃣ Dados gerais")
+                colg1, colg2, colg3 = st.columns(3)
+                with colg1:
+                    _cliente_gerar = st.selectbox("Cliente (importador)", _clientes_disp["apelido"].tolist(), key="gerar_cliente")
+                with colg2:
+                    _origem_gerar = st.text_input("Origem", value="CHINA", placeholder="Ex: CHINA, BRASIL, ALEMANHA", key="gerar_origem")
+                with colg3:
+                    _com_solicitante = st.radio("Tem solicitante?", ["Não", "Sim"], horizontal=True, key="gerar_tem_solic")
 
-            _solicitante_cnpj = ""
-            if _com_solicitante == "Sim":
-                _solicitante_cnpj = st.text_input("CNPJ do solicitante", key="gerar_solic_cnpj",
-                    help="Aparece quando um cliente empresta o registro para outro.")
+                _solicitante_cnpj = ""
+                if _com_solicitante == "Sim":
+                    _solicitante_cnpj = st.text_input("CNPJ do solicitante", key="gerar_solic_cnpj",
+                        help="Aparece quando um cliente empresta o registro para outro.")
 
-            # De onde puxar o REGISTRO (busca por fábrica+família)
-            st.markdown("**De onde puxar o número de registro?**")
-            colr1, colr2 = st.columns(2)
-            with colr1:
-                _sistema_reg = st.radio("Sistema", ["Sistema 5 Novo Projeto (Bolsa)", "Sistema 5 Próprios", "Sistema 5 Focus"],
-                    key="gerar_sistema_reg")
-            with colr2:
-                if _sistema_reg == "Sistema 5 Novo Projeto (Bolsa)":
-                    _cliente_base_reg = "BOLSA"
-                    st.info("Cliente base: **BOLSA**")
-                elif _sistema_reg == "Sistema 5 Focus":
-                    _cliente_base_reg = "FOCUS"
-                    st.info("Cliente base: **FOCUS**")
-                else:
-                    _clientes_base_disp = listar_clientes_base_registros()
-                    if _clientes_base_disp:
-                        _cliente_base_reg = st.selectbox("Cliente (base de registros)", _clientes_base_disp, key="gerar_clientebase_reg")
+                st.markdown("**De onde puxar o número de registro?**")
+                colr1, colr2 = st.columns(2)
+                with colr1:
+                    _sistema_reg = st.radio("Sistema", ["Sistema 5 Novo Projeto (Bolsa)", "Sistema 5 Próprios", "Sistema 5 Focus"],
+                        key="gerar_sistema_reg")
+                with colr2:
+                    if _sistema_reg == "Sistema 5 Novo Projeto (Bolsa)":
+                        _cliente_base_reg = "BOLSA"
+                        st.info("Cliente base: **BOLSA**")
+                    elif _sistema_reg == "Sistema 5 Focus":
+                        _cliente_base_reg = "FOCUS"
+                        st.info("Cliente base: **FOCUS**")
                     else:
-                        _cliente_base_reg = ""
-                        st.warning("Nenhum cliente na base de Registros.")
+                        _clientes_base_disp = listar_clientes_base_registros()
+                        if _clientes_base_disp:
+                            _cliente_base_reg = st.selectbox("Cliente (base de registros)", _clientes_base_disp, key="gerar_clientebase_reg")
+                        else:
+                            _cliente_base_reg = ""
+                            st.warning("Nenhum cliente na base de Registros.")
 
-            st.markdown("##### 2️⃣ Dados que valem pra todas as etiquetas deste lote")
-            cold1, cold2 = st.columns(2)
-            with cold1:
-                _data_fab_gerar = st.text_input("Data de Fabricação", value="", placeholder="Ex: Julho/2026", key="gerar_data_fab")
-            with cold2:
-                _lote_gerar = st.text_input("Lote", value="", placeholder="Ex: 202607", key="gerar_lote")
+            with st.container(border=True):
+                st.markdown("##### 2️⃣ Dados do lote")
+                cold1, cold2 = st.columns(2)
+                with cold1:
+                    _data_fab_gerar = st.text_input("Data de Fabricação", value="", placeholder="Ex: Julho/2026", key="gerar_data_fab")
+                with cold2:
+                    _lote_gerar = st.text_input("Lote", value="", placeholder="Ex: 202607", key="gerar_lote")
 
-            st.markdown("##### 3️⃣ Enviar o Excel (Packing List)")
-            _excel_gerar = st.file_uploader("Excel do Packing List", type=["xls", "xlsx"], key="gerar_excel_upload")
+            with st.container(border=True):
+                st.markdown("##### 3️⃣ Excel (Packing List)")
+                _excel_gerar = st.file_uploader("Enviar Excel do Packing List", type=["xls", "xlsx"], key="gerar_excel_upload")
 
             if _excel_gerar is not None:
                 import pandas as _pd_g
@@ -12510,122 +12518,122 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                 else:
                     st.success(f"✅ {len(_itens_lidos)} itens identificados no Excel.")
 
-                    st.markdown("##### 4️⃣ Configurar cada item")
-                    st.caption("Pra cada item: escolha o tipo de etiqueta, a variante de selo e a quantidade de peças. A idade é detectada do Excel (corrija se precisar).")
+                    with st.container(border=True):
+                        st.markdown("##### 4️⃣ Configurar cada item")
+                        st.caption("Pra cada item: escolha o tipo de etiqueta, a variante de selo e a quantidade de peças. A idade é detectada do Excel (corrija se precisar).")
 
-                    _TIPOS_ETIQUETA = {
-                        "padrao": "Padrão",
-                        "pilha": "C/ Pilha",
-                        "maquiagem": "Maquiagem",
-                        "massa": "Massa de Modelar",
-                    }
-                    _VARIANTES = list(_VARIANTES_SELO_VALIDAS.keys())
-                    _df_textos_todos = listar_textos_etiqueta()
-                    _NENHUM_TEXTO = "— nenhum —"
+                        _TIPOS_ETIQUETA = {
+                            "padrao": "Padrão",
+                            "pilha": "C/ Pilha",
+                            "maquiagem": "Maquiagem",
+                            "massa": "Massa de Modelar",
+                        }
+                        _VARIANTES = list(_VARIANTES_SELO_VALIDAS.keys())
+                        _df_textos_todos = listar_textos_etiqueta()
+                        _NENHUM_TEXTO = "— nenhum —"
 
-                    for _i, _item in enumerate(_itens_lidos):
-                        _ref_curta, _nome_curto = separar_referencia_nome(_item['referencia_full'])
-                        _idade_det = detectar_idade_do_nome(_item['nome'])
-                        _tem_pilha_det = detectar_tem_pilha_do_nome(_item['nome'])
-                        _tipo_sugerido = "pilha" if _tem_pilha_det else "padrao"
+                        for _i, _item in enumerate(_itens_lidos):
+                            _ref_curta, _nome_curto = separar_referencia_nome(_item['referencia_full'])
+                            _idade_det = detectar_idade_do_nome(_item['nome'])
+                            _tem_pilha_det = detectar_tem_pilha_do_nome(_item['nome'])
+                            _tipo_sugerido = "pilha" if _tem_pilha_det else "padrao"
 
-                        with st.expander(f"{_ref_curta} — {_nome_curto[:50]}", expanded=(_i < 3)):
-                            cc1, cc2, cc3, cc4 = st.columns(4)
-                            with cc1:
-                                _tipo = st.selectbox("Tipo", list(_TIPOS_ETIQUETA.keys()),
-                                    format_func=lambda t: _TIPOS_ETIQUETA[t],
-                                    index=list(_TIPOS_ETIQUETA.keys()).index(_tipo_sugerido),
-                                    key=f"tipo_{_i}")
-                            with cc2:
-                                _variante = st.selectbox("Selo", _VARIANTES,
-                                    format_func=lambda v: _VARIANTES_SELO_VALIDAS[v], key=f"variante_{_i}")
-                            with cc3:
-                                _qtd_excel = _item.get('qtd', '')
-                                try:
-                                    _pecas_default = max(1, int(float(_qtd_excel))) if _qtd_excel else 1
-                                except (ValueError, TypeError):
-                                    _pecas_default = 1
-                                _pecas = st.number_input("Peças", min_value=1, value=_pecas_default, step=1, key=f"pecas_{_i}")
-                            with cc4:
-                                _idade_num = st.number_input("Idade (nº)", min_value=0,
-                                    value=(_idade_det['numero'] if _idade_det else 3), step=1, key=f"idadenum_{_i}")
-                                _idade_uni = st.selectbox("Unidade", ["ANOS", "MESES"],
-                                    index=(0 if not _idade_det or _idade_det['unidade']=="ANOS" else 1), key=f"idadeuni_{_i}")
-                            st.caption(f"Registro (do Excel): {_item['registro'] or '(vazio)'} | Código: {_item['codigo_barras'] or '(vazio)'}")
+                            with st.expander(f"{_ref_curta} — {_nome_curto[:50]}", expanded=(_i < 3)):
+                                cc1, cc2, cc3, cc4 = st.columns(4)
+                                with cc1:
+                                    _tipo = st.selectbox("Tipo", list(_TIPOS_ETIQUETA.keys()),
+                                        format_func=lambda t: _TIPOS_ETIQUETA[t],
+                                        index=list(_TIPOS_ETIQUETA.keys()).index(_tipo_sugerido),
+                                        key=f"tipo_{_i}")
+                                with cc2:
+                                    _variante = st.selectbox("Selo", _VARIANTES,
+                                        format_func=lambda v: _VARIANTES_SELO_VALIDAS[v], key=f"variante_{_i}")
+                                with cc3:
+                                    _qtd_excel = _item.get('qtd', '')
+                                    try:
+                                        _pecas_default = max(1, int(float(_qtd_excel))) if _qtd_excel else 1
+                                    except (ValueError, TypeError):
+                                        _pecas_default = 1
+                                    _pecas = st.number_input("Peças", min_value=1, value=_pecas_default, step=1, key=f"pecas_{_i}")
+                                with cc4:
+                                    _idade_num = st.number_input("Idade (nº)", min_value=0,
+                                        value=(_idade_det['numero'] if _idade_det else 3), step=1, key=f"idadenum_{_i}")
+                                    _idade_uni = st.selectbox("Unidade", ["ANOS", "MESES"],
+                                        index=(0 if not _idade_det or _idade_det['unidade']=="ANOS" else 1), key=f"idadeuni_{_i}")
+                                st.caption(f"Registro (do Excel): {_item['registro'] or '(vazio)'} | Código: {_item['codigo_barras'] or '(vazio)'}")
 
-                            st.markdown("**Textos da etiqueta (ATENÇÃO/INDICAÇÃO/etc):**")
-                            _categorias_deste_tipo = CATEGORIAS_POR_TIPO_ETIQUETA.get(_tipo, [])
-                            _cols_txt = st.columns(len(_categorias_deste_tipo)) if _categorias_deste_tipo else []
-                            for _cat, _col_txt in zip(_categorias_deste_tipo, _cols_txt):
-                                with _col_txt:
-                                    if not _df_textos_todos.empty:
-                                        _opcoes_df = _df_textos_todos[
-                                            (_df_textos_todos['tipo'] == _tipo) & (_df_textos_todos['categoria'] == _cat)
-                                        ]
-                                    else:
-                                        _opcoes_df = _df_textos_todos
-                                    _opcoes = [_NENHUM_TEXTO] + list(_opcoes_df['titulo'])
-                                    st.selectbox(_cat.title(), _opcoes,
-                                        index=(1 if len(_opcoes) > 1 else 0),
-                                        key=f"txt_{_i}_{_cat}")
-                            if not _categorias_deste_tipo:
-                                st.caption("Esse tipo não usa textos de ATENÇÃO/INDICAÇÃO configuráveis.")
+                                st.markdown("**Textos da etiqueta (ATENÇÃO/INDICAÇÃO/etc):**")
+                                _categorias_deste_tipo = CATEGORIAS_POR_TIPO_ETIQUETA.get(_tipo, [])
+                                _cols_txt = st.columns(len(_categorias_deste_tipo)) if _categorias_deste_tipo else []
+                                for _cat, _col_txt in zip(_categorias_deste_tipo, _cols_txt):
+                                    with _col_txt:
+                                        if not _df_textos_todos.empty:
+                                            _opcoes_df = _df_textos_todos[
+                                                (_df_textos_todos['tipo'] == _tipo) & (_df_textos_todos['categoria'] == _cat)
+                                            ]
+                                        else:
+                                            _opcoes_df = _df_textos_todos
+                                        _opcoes = [_NENHUM_TEXTO] + list(_opcoes_df['titulo'])
+                                        st.selectbox(_cat.title(), _opcoes,
+                                            index=(1 if len(_opcoes) > 1 else 0),
+                                            key=f"txt_{_i}_{_cat}")
+                                if not _categorias_deste_tipo:
+                                    st.caption("Esse tipo não usa textos de ATENÇÃO/INDICAÇÃO configuráveis.")
 
-                    st.markdown("##### 5️⃣ Gerar")
-                    if st.button("🏭 Gerar etiquetas (Word + PDF)", type="primary", key="btn_gerar_lote"):
-                        _cli = buscar_cliente_etiqueta(_cliente_gerar)
-                        if not _cli:
-                            st.error("Cliente não encontrado.")
-                        else:
-                            # Monta a config lendo as escolhas de cada item do session_state
-                            _itens_config = []
-                            for _i, _item in enumerate(_itens_lidos):
-                                _tipo_item = st.session_state.get(f"tipo_{_i}", "padrao")
-                                _titulos_texto = {}
-                                for _cat in CATEGORIAS_POR_TIPO_ETIQUETA.get(_tipo_item, []):
-                                    _escolha = st.session_state.get(f"txt_{_i}_{_cat}")
-                                    if _escolha and _escolha != "— nenhum —":
-                                        _titulos_texto[_cat] = _escolha
-                                _itens_config.append({
-                                    'item': _item,
-                                    'tipo': _tipo_item,
-                                    'variante': st.session_state.get(f"variante_{_i}", _VARIANTES[0]),
-                                    'pecas': st.session_state.get(f"pecas_{_i}", 1),
-                                    'idade_num': st.session_state.get(f"idadenum_{_i}", 3),
-                                    'idade_uni': st.session_state.get(f"idadeuni_{_i}", "ANOS"),
-                                    'titulos_texto': _titulos_texto,
-                                })
-                            # Busca as imagens de chorão e pilha do banco (uma vez)
-                            _chorao_bytes, _ = buscar_asset_generico("chorao")
-                            _pilha_bytes, _ = buscar_asset_generico("pilha")
-
-                            with st.spinner("Gerando etiquetas... (a conversão dos selos pode levar um tempo)"):
-                                _resultado = _gerar_lote_etiquetas(
-                                    _itens_config, _cli, _origem_gerar, _solicitante_cnpj,
-                                    _data_fab_gerar, _lote_gerar, _cliente_base_reg,
-                                    chorao_png_bytes=_chorao_bytes, pilha_png_bytes=_pilha_bytes
-                                )
-                            if _resultado and _resultado.get('docx'):
-                                st.session_state['etiq_docx_bytes'] = _resultado['docx']
-                                st.session_state['etiq_avisos'] = _resultado.get('avisos', [])
-                                st.success("✅ Etiquetas geradas! Clique em Baixar abaixo.")
+                    with st.container(border=True):
+                        st.markdown("##### 5️⃣ Gerar")
+                        if st.button("🏭 Gerar etiquetas (Word + PDF)", type="primary", key="btn_gerar_lote"):
+                            _cli = buscar_cliente_etiqueta(_cliente_gerar)
+                            if not _cli:
+                                st.error("Cliente não encontrado.")
                             else:
-                                st.session_state.pop('etiq_docx_bytes', None)
-                                st.error("Não foi possível gerar as etiquetas.")
+                                _itens_config = []
+                                for _i, _item in enumerate(_itens_lidos):
+                                    _tipo_item = st.session_state.get(f"tipo_{_i}", "padrao")
+                                    _titulos_texto = {}
+                                    for _cat in CATEGORIAS_POR_TIPO_ETIQUETA.get(_tipo_item, []):
+                                        _escolha = st.session_state.get(f"txt_{_i}_{_cat}")
+                                        if _escolha and _escolha != "— nenhum —":
+                                            _titulos_texto[_cat] = _escolha
+                                    _itens_config.append({
+                                        'item': _item,
+                                        'tipo': _tipo_item,
+                                        'variante': st.session_state.get(f"variante_{_i}", _VARIANTES[0]),
+                                        'pecas': st.session_state.get(f"pecas_{_i}", 1),
+                                        'idade_num': st.session_state.get(f"idadenum_{_i}", 3),
+                                        'idade_uni': st.session_state.get(f"idadeuni_{_i}", "ANOS"),
+                                        'titulos_texto': _titulos_texto,
+                                    })
+                                _chorao_bytes, _ = buscar_asset_generico("chorao")
+                                _pilha_bytes, _ = buscar_asset_generico("pilha")
 
-                    # Download fora do if st.button para sobreviver ao re-run do Streamlit
-                    if st.session_state.get('etiq_docx_bytes'):
-                        st.download_button("⬇️ Baixar Word (.docx)",
-                            st.session_state['etiq_docx_bytes'],
-                            "etiquetas.docx",
-                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key="dl_etiq_docx")
-                        st.caption("Pra ter em PDF: abra o Word e use 'Salvar como PDF'.")
-                        _avisos_etiq = st.session_state.get('etiq_avisos', [])
-                        if _avisos_etiq:
-                            st.markdown("**Avisos:**")
-                            for _av in _avisos_etiq[:40]:
-                                st.warning(_av)
+                                with st.spinner("Gerando etiquetas... (a conversão dos selos pode levar um tempo)"):
+                                    _resultado = _gerar_lote_etiquetas(
+                                        _itens_config, _cli, _origem_gerar, _solicitante_cnpj,
+                                        _data_fab_gerar, _lote_gerar, _cliente_base_reg,
+                                        chorao_png_bytes=_chorao_bytes, pilha_png_bytes=_pilha_bytes
+                                    )
+                                if _resultado and _resultado.get('docx'):
+                                    st.session_state['etiq_docx_bytes'] = _resultado['docx']
+                                    st.session_state['etiq_avisos'] = _resultado.get('avisos', [])
+                                    st.success("✅ Etiquetas geradas! Clique em Baixar abaixo.")
+                                else:
+                                    st.session_state.pop('etiq_docx_bytes', None)
+                                    st.error("Não foi possível gerar as etiquetas.")
+
+                        # Download fora do if st.button para sobreviver ao re-run do Streamlit
+                        if st.session_state.get('etiq_docx_bytes'):
+                            st.download_button("⬇️ Baixar Word (.docx)",
+                                st.session_state['etiq_docx_bytes'],
+                                "etiquetas.docx",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="dl_etiq_docx")
+                            st.caption("Pra ter em PDF: abra o Word e use 'Salvar como PDF'.")
+                            _avisos_etiq = st.session_state.get('etiq_avisos', [])
+                            if _avisos_etiq:
+                                st.markdown("**Avisos:**")
+                                for _av in _avisos_etiq[:40]:
+                                    st.warning(_av)
 
     with tab_clientes:
         st.subheader("Clientes / Importadores")
@@ -12685,7 +12693,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                 _sac = st.text_input("SAC (email)", value=(_dados_edit["sac"] if _dados_edit else ""), placeholder="Ex: atefcomercio@outlook.com", key="cli_sac")
                 st.caption("ℹ️ A Origem (ex: CHINA) é perguntada na hora de gerar a etiqueta, não aqui — pode variar de lote pra lote.")
 
-            col_b1, col_b2, col_b3 = st.columns([1, 1, 1])
+            col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
                 _btn_label = "💾 Atualizar cliente" if _modo_edicao else "💾 Cadastrar cliente"
                 if st.button(_btn_label, key="salvar_cliente_etiqueta", type="primary"):
@@ -12752,29 +12760,30 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                     st.rerun()
 
         st.divider()
-        st.markdown("**🧪 Testar substituição de registro**")
-        st.caption("Veja como fica um selo com um registro específico, antes de usar na geração real.")
-        col_t1, col_t2 = st.columns(2)
-        with col_t1:
-            _var_teste = st.selectbox("Variante", list(_VARIANTES_SELO_VALIDAS.keys()), format_func=lambda v: _VARIANTES_SELO_VALIDAS[v], key="var_teste_selo")
-        with col_t2:
-            _reg_teste = st.text_input("Registro (formato do banco, ex: 003565/2023)", key="reg_teste_selo")
-        if st.button("Gerar selo de teste", key="btn_teste_selo"):
-            if not clean(_reg_teste):
-                st.error("Informe um número de registro.")
-            else:
-                _docx_gerado = gerar_selo_com_registro(_var_teste, _reg_teste)
-                if _docx_gerado:
-                    st.download_button(
-                        "⬇️ Baixar selo de teste (.docx)",
-                        _docx_gerado,
-                        f"selo_teste_{_var_teste}.docx",
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key="download_selo_teste"
-                    )
-                    st.success("Selo gerado! Baixe e confira se o número ficou correto.")
+        with st.container(border=True):
+            st.markdown("**🧪 Testar substituição de registro**")
+            st.caption("Veja como fica um selo com um registro específico, antes de usar na geração real.")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                _var_teste = st.selectbox("Variante", list(_VARIANTES_SELO_VALIDAS.keys()), format_func=lambda v: _VARIANTES_SELO_VALIDAS[v], key="var_teste_selo")
+            with col_t2:
+                _reg_teste = st.text_input("Número de registro", placeholder="Ex: 003565/2023", key="reg_teste_selo")
+            if st.button("Gerar selo de teste", key="btn_teste_selo"):
+                if not clean(_reg_teste):
+                    st.error("Informe um número de registro.")
                 else:
-                    st.error(f"O modelo '{_VARIANTES_SELO_VALIDAS[_var_teste]}' ainda não foi cadastrado.")
+                    _docx_gerado = gerar_selo_com_registro(_var_teste, _reg_teste)
+                    if _docx_gerado:
+                        st.download_button(
+                            "⬇️ Baixar selo de teste (.docx)",
+                            _docx_gerado,
+                            f"selo_teste_{_var_teste}.docx",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key="download_selo_teste"
+                        )
+                        st.success("Selo gerado! Baixe e confira se o número ficou correto.")
+                    else:
+                        st.error(f"O modelo '{_VARIANTES_SELO_VALIDAS[_var_teste]}' ainda não foi cadastrado.")
 
     with tab_textos:
         st.subheader("Textos padrão da etiqueta")
@@ -12799,34 +12808,34 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
         _CATEGORIAS_TEXTO = ["ATENÇÃO", "INDICAÇÃO", "ADVERTÊNCIA", "CUIDADOS DE USO", "COMPOSIÇÃO", "RESTRITIVO", "OUTROS"]
         _TIPOS_TEXTO = {"padrao": "Padrão", "pilha": "C/ Pilha", "maquiagem": "Maquiagem", "massa": "Massa de Modelar"}
 
-        col_txt1, col_txt2 = st.columns([1, 2])
-        with col_txt1:
-            tipo_texto = st.selectbox("Tipo de etiqueta", list(_TIPOS_TEXTO.keys()), format_func=lambda t: _TIPOS_TEXTO[t], key="tipo_texto_etiqueta")
-            cat_texto = st.selectbox("Categoria", _CATEGORIAS_TEXTO, key="cat_texto_etiqueta")
-            titulo_texto = st.text_input("Título/apelido (pra você identificar)", placeholder="Ex: Advertência padrão pilha", key="titulo_texto_etiqueta")
-        with col_txt2:
-            conteudo_texto = st.text_area("Conteúdo do texto (use **texto** para negrito)", height=150, placeholder="Ex: **ATENÇÃO:** NÃO RECOMENDÁVEL PARA CRIANÇAS MENORES DE 03 ANOS...", key="conteudo_texto_etiqueta")
+        with st.container(border=True):
+            col_txt1, col_txt2 = st.columns([1, 3])
+            with col_txt1:
+                tipo_texto = st.selectbox("Tipo de etiqueta", list(_TIPOS_TEXTO.keys()), format_func=lambda t: _TIPOS_TEXTO[t], key="tipo_texto_etiqueta")
+                cat_texto = st.selectbox("Categoria", _CATEGORIAS_TEXTO, key="cat_texto_etiqueta")
+                titulo_texto = st.text_input("Título/apelido (pra você identificar)", placeholder="Ex: Advertência padrão pilha", key="titulo_texto_etiqueta")
+            with col_txt2:
+                conteudo_texto = st.text_area("Conteúdo do texto (use **texto** para negrito)", height=150, placeholder="Ex: **ATENÇÃO:** NÃO RECOMENDÁVEL PARA CRIANÇAS MENORES DE 03 ANOS...", key="conteudo_texto_etiqueta")
 
-        # Pré-visualização ao vivo de como vai ficar (negrito aplicado, asteriscos removidos)
-        if clean(conteudo_texto):
-            st.markdown("**Pré-visualização (como vai aparecer na etiqueta):**")
-            _preview_texto = conteudo_texto
-            if "{IDADE}" in _preview_texto:
-                _preview_texto = _preview_texto.replace("{IDADE}", "03 (TRÊS) ANOS")
-                st.caption("(No exemplo abaixo, {IDADE} foi preenchido com '03 (TRÊS) ANOS' só pra ilustrar — na geração real, vem do Excel.)")
-            st.markdown(
-                f"<div style='border:1px solid #ddd;border-radius:6px;padding:10px;background:#fafafa'>{texto_para_preview_html(_preview_texto)}</div>",
-                unsafe_allow_html=True
-            )
+            if clean(conteudo_texto):
+                st.markdown("**Pré-visualização (como vai aparecer na etiqueta):**")
+                _preview_texto = conteudo_texto
+                if "{IDADE}" in _preview_texto:
+                    _preview_texto = _preview_texto.replace("{IDADE}", "03 (TRÊS) ANOS")
+                    st.caption("(No exemplo abaixo, {IDADE} foi preenchido com '03 (TRÊS) ANOS' só pra ilustrar — na geração real, vem do Excel.)")
+                st.markdown(
+                    f"<div style='border:1px solid #ddd;border-radius:6px;padding:10px;background:#fafafa'>{texto_para_preview_html(_preview_texto)}</div>",
+                    unsafe_allow_html=True
+                )
 
-        if st.button("💾 Salvar texto", key="salvar_texto_etiqueta_btn"):
-            if not (clean(titulo_texto) and clean(conteudo_texto)):
-                st.error("Preencha o título e o conteúdo do texto.")
-            else:
-                salvar_texto_etiqueta(cat_texto, titulo_texto, conteudo_texto, tipo=tipo_texto)
-                st.success("Texto salvo ✅")
-                st.cache_data.clear()
-                st.rerun()
+            if st.button("💾 Salvar texto", key="salvar_texto_etiqueta_btn"):
+                if not (clean(titulo_texto) and clean(conteudo_texto)):
+                    st.error("Preencha o título e o conteúdo do texto.")
+                else:
+                    salvar_texto_etiqueta(cat_texto, titulo_texto, conteudo_texto, tipo=tipo_texto)
+                    st.success("Texto salvo ✅")
+                    st.cache_data.clear()
+                    st.rerun()
 
         st.divider()
         st.markdown("**Textos já cadastrados:**")
