@@ -12749,12 +12749,27 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         _opcoes = [_NENHUM_TEXTO] + list(_opcoes_df['titulo'])
                                         # +18m sem pilha → ATENÇÃO fica vazia por padrão
                                         _aten_18m_sem_pilha = (_cat == 'ATENÇÃO' and _is_18m and not _tem_pilha_det)
-                                        _default_idx = 0 if _aten_18m_sem_pilha else (1 if len(_opcoes) > 1 else 0)
+                                        # +18m com pilha → prefere texto de ATENÇÃO SEM "partes pequenas"
+                                        _aten_18m_com_pilha = (_cat == 'ATENÇÃO' and _is_18m and _tem_pilha_det)
+                                        if _aten_18m_sem_pilha:
+                                            _default_idx = 0
+                                        elif _aten_18m_com_pilha and not _opcoes_df.empty:
+                                            # Procura texto sem restrição de idade (sem MENOR/PARTE)
+                                            _default_idx = 1 if len(_opcoes) > 1 else 0
+                                            for _oi, (_, _or) in enumerate(_opcoes_df.iterrows()):
+                                                _c = str(_or.get('conteudo', '')).upper()
+                                                if 'MENOR' not in _c and 'PARTE' not in _c:
+                                                    _default_idx = 1 + _oi
+                                                    break
+                                        else:
+                                            _default_idx = 1 if len(_opcoes) > 1 else 0
                                         st.selectbox(_cat.title(), _opcoes,
                                             index=_default_idx,
                                             key=f"txt_{_i}_{_cat}")
                                         if _aten_18m_sem_pilha:
                                             st.caption("ℹ️ +18m sem pilha: ATENÇÃO deixada em branco automaticamente.")
+                                        elif _aten_18m_com_pilha:
+                                            st.caption("ℹ️ +18m com pilha: selecionado texto de montagem por adulto (sem partes pequenas).")
                                 if not _categorias_deste_tipo:
                                     st.caption("Esse tipo não usa textos de ATENÇÃO/INDICAÇÃO configuráveis.")
 
