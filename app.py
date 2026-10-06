@@ -4439,7 +4439,8 @@ def selo_docx_para_png(selo_docx_bytes, soffice_path, coletar_erro=None):
 
 def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, pilha_png=None, variante_selo=None,
                             pilha_pos_h_cm=1.767, pilha_pos_v_cm=0.172,
-                            logo_png=None, logo_pos_h_cm=0.5, logo_pos_v_cm=1.0):
+                            logo_png=None, logo_pos_h_cm=0.5, logo_pos_v_cm=1.0,
+                            logo_largura_cm=2.0, logo_altura_cm=1.0):
     """Monta uma etiqueta (tabela 2 colunas) dentro do documento `doc`.
     Medidas extraídas do padrão real da empresa:
     - Fonte Arial 7pt (corpo), 8,5pt (prefixo ATENÇÃO/INDICAÇÃO/ADVERTÊNCIA e rodapé), 8pt (referência/nome)
@@ -4679,7 +4680,7 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         _p_logo = cell_esq.add_paragraph()
         _p_logo.paragraph_format.space_after = _Pt(0)
         _run_logo = _p_logo.add_run()
-        _run_logo.add_picture(_Bio(logo_png), width=_Cm(2.0), height=_Cm(1.0))
+        _run_logo.add_picture(_Bio(logo_png), width=_Cm(logo_largura_cm), height=_Cm(logo_altura_cm))
         _tornar_imagem_flutuante_xy(
             _run_logo, doc_pr_id=400,
             pos_h_cm=logo_pos_h_cm, pos_v_cm=logo_pos_v_cm,
@@ -4942,6 +4943,96 @@ def _html_preview_label(
     return html
 
 
+def _html_drag_logo_canvas(
+    logo_b64, logo_h_cm=0.5, logo_v_cm=5.0, logo_w_cm=2.0, logo_hh_cm=1.0,
+    tem_pilha=False, pilha_h_cm=1.767, pilha_v_cm=0.172
+):
+    """Canvas HTML com logo arrastável e redimensionável por mouse. 1cm=22px."""
+    S = 22
+    COL_E = int(8 * S)
+    COL_D = int(10 * S)
+    ALT = int(9 * S)
+    px_h = int(logo_h_cm * S)
+    px_v = int(logo_v_cm * S)
+    px_w = max(22, int(logo_w_cm * S))
+    px_hh = max(11, int(logo_hh_cm * S))
+    # Pilha: posição dentro do bloco ADVERTÊNCIA (aprox. 6+42+3+42+3=96px do topo)
+    adv_off = 96
+    px_ph = int(pilha_h_cm * S)
+    px_pv = int(pilha_v_cm * S)
+    pilha_html = (
+        f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
+        f'width:22px;height:20px;background:#fd7e14;border-radius:50%;'
+        f'display:flex;align-items:center;justify-content:center;font-size:11px;z-index:5;">⚡</div>'
+    ) if tem_pilha else ''
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:Arial,sans-serif;background:transparent;padding:2px}}
+#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;height:{ALT}px;position:relative;overflow:hidden;user-select:none}}
+#le{{width:{COL_E}px;min-width:{COL_E}px;height:{ALT}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px;position:relative;overflow:hidden}}
+#rd{{width:{COL_D}px;height:{ALT}px;padding:6px;position:relative;overflow:hidden}}
+#lg{{position:absolute;left:{px_h}px;top:{px_v}px;width:{px_w}px;height:{px_hh}px;cursor:move;border:2px dashed #007bff;z-index:20}}
+#lg img{{width:100%;height:100%;object-fit:contain;pointer-events:none;display:block}}
+#rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#007bff;cursor:se-resize;border-radius:0 0 3px 0}}
+#cd{{font-size:11px;color:#1a6bcc;font-family:monospace;margin-top:5px;padding:4px 8px;background:#f0f7ff;border-radius:3px;border:1px solid #c8dcf5;display:inline-block}}
+</style></head><body>
+<div id="lc">
+  <div id="le">
+    <div style="background:#ccc;border-radius:2px;padding:2px 4px;font-size:8px;text-align:center;margin-bottom:4px">SELO INMETRO</div>
+    <div style="font-size:7px;color:#555;line-height:1.4">Importador: ...<br>Endereço: ...<br>CNPJ: ...<br>Origem: ...</div>
+    <div id="lg"><img src="data:image/png;base64,{logo_b64}"><div id="rh"></div></div>
+    <div style="position:absolute;bottom:8px;left:6px;right:6px;background:#ddd;height:18px;border-radius:2px;font-size:7px;text-align:center;line-height:18px">||| CÓDIGO DE BARRAS |||</div>
+  </div>
+  <div id="rd">
+    <div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">INDICAÇÃO</div>
+    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">ATENÇÃO</div>
+    <div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;padding:3px 5px;font-size:9px;height:42px;position:relative">ADVERTÊNCIA{pilha_html}</div>
+  </div>
+</div>
+<div id="cd">🏷 H=<b id="ch">{logo_h_cm:.2f}</b>cm &nbsp; V=<b id="cv">{logo_v_cm:.2f}</b>cm &nbsp; Largura=<b id="cw">{logo_w_cm:.2f}</b>cm &nbsp; Altura=<b id="chh">{logo_hh_cm:.2f}</b>cm
+  &nbsp;&nbsp;<span style="color:#888;font-size:10px">⟲ arraste · alça azul=redimensionar</span></div>
+<script>
+(function(){{
+const S={S},CE={COL_E},AL={ALT};
+const el=document.getElementById('lg'),rh=document.getElementById('rh');
+const ch=document.getElementById('ch'),cv=document.getElementById('cv');
+const cw=document.getElementById('cw'),chh=document.getElementById('chh');
+let dr=false,rs=false,sx,sy,sl,st2,sw,sh;
+function fmt(n){{return(Math.round(n*20)/20).toFixed(2)}}
+function upd(){{
+  const l=parseInt(el.style.left)||0,t=parseInt(el.style.top)||0;
+  ch.textContent=fmt(l/S);cv.textContent=fmt(t/S);
+  cw.textContent=fmt(el.offsetWidth/S);chh.textContent=fmt(el.offsetHeight/S);
+}}
+el.addEventListener('mousedown',function(e){{
+  if(e.target===rh)return;
+  dr=true;sx=e.clientX;sy=e.clientY;
+  sl=parseInt(el.style.left)||0;st2=parseInt(el.style.top)||0;
+  e.preventDefault();
+}});
+rh.addEventListener('mousedown',function(e){{
+  rs=true;sx=e.clientX;sy=e.clientY;sw=el.offsetWidth;sh=el.offsetHeight;
+  e.preventDefault();e.stopPropagation();
+}});
+document.addEventListener('mousemove',function(e){{
+  if(dr){{
+    let nl=Math.max(0,Math.min(CE-el.offsetWidth-2,sl+(e.clientX-sx)));
+    let nt=Math.max(0,Math.min(AL-el.offsetHeight-2,st2+(e.clientY-sy)));
+    el.style.left=nl+'px';el.style.top=nt+'px';upd();
+  }}else if(rs){{
+    let nl=parseInt(el.style.left)||0,nt=parseInt(el.style.top)||0;
+    let nw=Math.max(22,Math.min(CE-nl,sw+(e.clientX-sx)));
+    let nh=Math.max(11,Math.min(AL-nt,sh+(e.clientY-sy)));
+    el.style.width=nw+'px';el.style.height=nh+'px';upd();
+  }}
+}});
+document.addEventListener('mouseup',function(){{dr=false;rs=false;}});
+upd();
+}})();
+</script></body></html>"""
+
+
 def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_fab, lote,
                           cliente_base_registro, chorao_png_bytes=None, pilha_png_bytes=None,
                           chorao18_png_bytes=None):
@@ -5075,9 +5166,11 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
             variante_selo=cfg['variante'],
             pilha_pos_h_cm=cfg.get('pilha_pos_h', 1.767),
             pilha_pos_v_cm=cfg.get('pilha_pos_v', 0.172),
-            logo_png=cfg.get('logo_png'),
+            logo_png=cfg.get('logo_png') if cfg.get('logo_ativo', False) else None,
             logo_pos_h_cm=cfg.get('logo_pos_h', 0.5),
-            logo_pos_v_cm=cfg.get('logo_pos_v', 1.0),
+            logo_pos_v_cm=cfg.get('logo_pos_v', 5.0),
+            logo_largura_cm=cfg.get('logo_largura_cm', 2.0),
+            logo_altura_cm=cfg.get('logo_altura_cm', 1.0),
         )
 
         if idx < len(itens_config) - 1:
@@ -12995,22 +13088,44 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 if not _categorias_deste_tipo:
                                     st.caption("Esse tipo não usa textos de ATENÇÃO/INDICAÇÃO configuráveis.")
 
+                                import streamlit.components.v1 as _stc_prev
+                                import base64 as _b64_prev
+                                _logo_bytes_cur, _, _, _ = buscar_logo_cliente(_cliente_gerar)
+
                                 # --- Posição da imagem de pilha (apenas itens pilha) ---
                                 if _tem_pilha_det:
-                                    import streamlit.components.v1 as _stc_prev
-                                    import base64 as _b64_prev
                                     st.markdown("**📍 Posição da imagem de pilha:**")
-                                    _pp_h = st.slider("Horizontal (cm, dentro da coluna direita)", 0.0, 5.0, 1.767, 0.05, key=f"pilha_pos_h_{_i}")
+                                    _pp_h = st.slider("Horizontal (cm, coluna direita)", 0.0, 5.0, 1.767, 0.05, key=f"pilha_pos_h_{_i}")
                                     _pp_v = st.slider("Vertical (cm, do topo do bloco ADVERTÊNCIA)", -1.0, 5.0, 0.172, 0.05, key=f"pilha_pos_v_{_i}")
-                                    _pilha_bytes_prev, _ = buscar_asset_generico("pilha")
-                                    # Preview logo do cliente (se houver) junto com pilha
-                                    _logo_bytes_prev, _, _logo_h_prev, _logo_v_prev = buscar_logo_cliente(_cliente_gerar)
-                                    _logo_b64_prev = _b64_prev.b64encode(_logo_bytes_prev).decode() if _logo_bytes_prev else None
                                     _prev = _html_preview_label(
-                                        tem_pilha=True, pilha_pos_h=_pp_h, pilha_pos_v=_pp_v,
-                                        logo_b64=_logo_b64_prev, logo_pos_h=_logo_h_prev, logo_pos_v=_logo_v_prev
+                                        tem_pilha=True, pilha_pos_h=_pp_h, pilha_pos_v=_pp_v
                                     )
-                                    _stc_prev.html(_prev, height=240)
+                                    _stc_prev.html(_prev, height=225)
+                                else:
+                                    _pp_h, _pp_v = 1.767, 0.172
+
+                                # --- Logo do cliente ---
+                                if _logo_bytes_cur:
+                                    st.markdown("**🎨 Logo do cliente:**")
+                                    _usar_logo_i = st.checkbox("📌 Adicionar logo nesta etiqueta", value=False, key=f"usar_logo_{_i}")
+                                    if _usar_logo_i:
+                                        _logo_b64_cur = _b64_prev.b64encode(_logo_bytes_cur).decode()
+                                        _lc1, _lc2 = st.columns(2)
+                                        with _lc1:
+                                            _lh = st.number_input("H (cm, da esquerda)", 0.0, 8.0, 0.5, 0.05, key=f"logo_pos_h_{_i}", format="%.2f")
+                                            _lv = st.number_input("V (cm, do topo)", 0.0, 9.0, 5.0, 0.05, key=f"logo_pos_v_{_i}", format="%.2f")
+                                        with _lc2:
+                                            _lw = st.number_input("Largura (cm)", 0.5, 7.0, 2.0, 0.05, key=f"logo_w_{_i}", format="%.2f")
+                                            _lhh = st.number_input("Altura (cm)", 0.3, 4.0, 1.0, 0.05, key=f"logo_hh_{_i}", format="%.2f")
+                                        st.caption("💡 Arraste a logo no preview · alça azul canto inferior direito = redimensionar · leia H/V/Largura/Altura e ajuste os campos acima para posição exata.")
+                                        _drag_html = _html_drag_logo_canvas(
+                                            _logo_b64_cur,
+                                            logo_h_cm=_lh, logo_v_cm=_lv,
+                                            logo_w_cm=_lw, logo_hh_cm=_lhh,
+                                            tem_pilha=_tem_pilha_det,
+                                            pilha_h_cm=_pp_h, pilha_v_cm=_pp_v
+                                        )
+                                        _stc_prev.html(_drag_html, height=255)
 
                     with st.container(border=True):
                         st.markdown("##### 5️⃣ Gerar")
@@ -13019,7 +13134,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             if not _cli:
                                 st.error("Cliente não encontrado.")
                             else:
-                                _logo_bytes_gen, _, _logo_pos_h_gen, _logo_pos_v_gen = buscar_logo_cliente(_cliente_gerar)
+                                _logo_bytes_gen, _, _, _ = buscar_logo_cliente(_cliente_gerar)
                                 _itens_config = []
                                 for _i, _item in enumerate(_itens_lidos):
                                     _tipo_item = st.session_state.get(f"tipo_{_i}", "padrao")
@@ -13038,9 +13153,12 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         'titulos_texto': _titulos_texto,
                                         'pilha_pos_h': st.session_state.get(f"pilha_pos_h_{_i}", 1.767),
                                         'pilha_pos_v': st.session_state.get(f"pilha_pos_v_{_i}", 0.172),
+                                        'logo_ativo': st.session_state.get(f"usar_logo_{_i}", False),
                                         'logo_png': _logo_bytes_gen,
-                                        'logo_pos_h': _logo_pos_h_gen,
-                                        'logo_pos_v': _logo_pos_v_gen,
+                                        'logo_pos_h': st.session_state.get(f"logo_pos_h_{_i}", 0.5),
+                                        'logo_pos_v': st.session_state.get(f"logo_pos_v_{_i}", 5.0),
+                                        'logo_largura_cm': st.session_state.get(f"logo_w_{_i}", 2.0),
+                                        'logo_altura_cm': st.session_state.get(f"logo_hh_{_i}", 1.0),
                                     })
                                 _chorao_bytes, _ = buscar_asset_generico("chorao")
                                 _pilha_bytes, _ = buscar_asset_generico("pilha")
@@ -13167,7 +13285,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
 
     with tab_logos:
         st.subheader("Logos de clientes")
-        st.caption("Vincule uma logo a cada cliente. Nas etiquetas geradas para esse cliente, a logo aparece automaticamente na posição que você configurar.")
+        st.caption("Vincule uma logo a cada cliente. Na aba 🏭 Gerar, marque 'Adicionar logo' por etiqueta e posicione arrastando no preview.")
 
         _clientes_logo = listar_clientes_etiqueta()
         if _clientes_logo.empty:
@@ -13177,20 +13295,20 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
             _cli_sel_logo = st.selectbox("Selecionar cliente", _apelidos_logo, key="sel_cliente_logo")
 
             if _cli_sel_logo:
-                _logo_bytes, _logo_nome, _logo_pos_h_db, _logo_pos_v_db = buscar_logo_cliente(_cli_sel_logo)
+                _logo_bytes, _logo_nome, _, _ = buscar_logo_cliente(_cli_sel_logo)
 
-                col_logo1, col_logo2 = st.columns([1, 2])
+                col_logo1, col_logo2 = st.columns([1, 1])
                 with col_logo1:
                     st.markdown("**Logo atual:**")
                     if _logo_bytes:
-                        st.image(_logo_bytes, caption=_logo_nome or "", width=160)
+                        st.image(_logo_bytes, caption=_logo_nome or "", width=180)
                     else:
                         st.info("Sem logo cadastrada.")
+                with col_logo2:
                     _novo_logo = st.file_uploader("Enviar/substituir logo", type=["png", "jpg", "jpeg"], key="upload_logo_cli")
                     if _novo_logo and st.button("💾 Salvar logo", key="btn_salvar_logo_cli"):
                         _novo_logo.seek(0)
-                        salvar_logo_cliente(_cli_sel_logo, _novo_logo.read(), _novo_logo.name,
-                                            pos_h_cm=_logo_pos_h_db, pos_v_cm=_logo_pos_v_db)
+                        salvar_logo_cliente(_cli_sel_logo, _novo_logo.read(), _novo_logo.name)
                         st.success("Logo salva ✅")
                         st.cache_data.clear()
                         st.rerun()
@@ -13199,30 +13317,8 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                         st.success("Logo removida ✅")
                         st.cache_data.clear()
                         st.rerun()
-
-                with col_logo2:
                     if _logo_bytes:
-                        st.markdown("**Posição na etiqueta:**")
-                        st.caption("Ajuste os sliders e veja a pré-visualização. Clique em 'Salvar posição' para fixar.")
-                        _ph = st.slider("Horizontal (cm, da esquerda da coluna esq.)", 0.0, 7.5, float(_logo_pos_h_db), 0.1, key="logo_pos_h_slider")
-                        _pv = st.slider("Vertical (cm, do topo da coluna esq.)", 0.0, 8.0, float(_logo_pos_v_db), 0.1, key="logo_pos_v_slider")
-
-                        import base64 as _b64
-                        _logo_b64 = _b64.b64encode(_logo_bytes).decode()
-                        _prev_html = _html_preview_label(
-                            tem_pilha=False, logo_b64=_logo_b64,
-                            logo_pos_h=_ph, logo_pos_v=_pv
-                        )
-                        import streamlit.components.v1 as _stc
-                        _stc.html(_prev_html, height=230)
-
-                        if st.button("💾 Salvar posição", key="btn_salvar_pos_logo"):
-                            atualizar_posicao_logo_cliente(_cli_sel_logo, _ph, _pv)
-                            st.success("Posição salva ✅")
-                            st.cache_data.clear()
-                            st.rerun()
-                    else:
-                        st.info("Faça upload de uma logo para configurar a posição.")
+                        st.info("✅ Logo cadastrada. Ao gerar etiquetas deste cliente, marque '📌 Adicionar logo' por item e ajuste posição/tamanho no preview interativo.")
 
     with tab_selos:
         st.subheader("Modelos de selo (Word editável)")
