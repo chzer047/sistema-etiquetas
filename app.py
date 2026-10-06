@@ -4946,46 +4946,124 @@ def _html_preview_label(
 
 def _html_drag_pilha_canvas(
     pilha_h_cm=1.767, pilha_v_cm=0.172, pilha_w_cm=1.0, pilha_hh_cm=0.95,
-    pilha_b64=None
+    pilha_b64=None,
+    cliente_info=None, item_nome='', item_ref='', item_qtd='',
+    textos_dir=None, tem_chorao=False
 ):
     """Canvas HTML com imagem de pilha arrastável na coluna direita.
-    H = da esquerda da coluna direita; V = do topo do bloco ADVERTÊNCIA. 1cm=22px."""
+    H = da esquerda da coluna direita; V = do topo do bloco ADVERTÊNCIA. 1cm=22px.
+    Renderiza conteúdo real do cliente/produto no preview."""
     S = 22
     COL_E = int(8 * S)
     COL_D = int(10 * S)
-    ALT = int(9 * S)
-    # ADVERTÊNCIA começa em: padding(6) + INDICAÇÃO(42) + gap(3) + ATENÇÃO(42) + gap(3) = 96px
-    ADV_TOP = 96
+    ADV_FALLBACK = 96
     px_h = int(pilha_h_cm * S)
-    px_v = ADV_TOP + int(pilha_v_cm * S)
+    px_v = ADV_FALLBACK + int(pilha_v_cm * S)
     px_w = max(11, int(pilha_w_cm * S))
     px_hh = max(11, int(pilha_hh_cm * S))
+
+    def _esc(s):
+        return str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('**', '')
+
+    ci = cliente_info or {}
+    razao = _esc(ci.get('razao_social', ''))[:55]
+    cnpj = _esc(ci.get('cnpj', ''))[:25]
+    endereco = _esc(ci.get('endereco', ''))[:70]
+    origem = _esc(ci.get('origem', ''))[:35]
+    sac = _esc(ci.get('sac', ''))[:55]
+    nome = _esc(item_nome)[:55]
+    ref = _esc(item_ref)[:20]
+    qtd = _esc(item_qtd)[:20]
+
     if pilha_b64:
         pilha_inner = f'<img src="data:image/png;base64,{pilha_b64}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">'
     else:
         pilha_inner = '<div style="width:100%;height:100%;background:#fd7e14;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;pointer-events:none">⚡</div>'
+
+    blk_colors = {
+        'ATENÇÃO': ('#fff3cd', '#ffc107'),
+        'INDICAÇÃO': ('#d4edda', '#c3e6cb'),
+        'ADVERTÊNCIA': ('#f8d7da', '#f5c6cb'),
+        'CUIDADOS DE USO': ('#e2e3e5', '#c6c8ca'),
+        'COMPOSIÇÃO': ('#cfe2ff', '#b6d4fe'),
+    }
+
+    right_html = ''
+    adv_set = False
+    if textos_dir:
+        for cat, content in textos_dir:
+            bg, bd = blk_colors.get(cat.upper(), ('#e2e3e5', '#c6c8ca'))
+            cont_esc = _esc(content)
+            if len(cont_esc) > 220:
+                cont_esc = cont_esc[:220] + '…'
+            is_adv = (cat.upper() == 'ADVERTÊNCIA')
+            adv_id = ' id="adv-block"' if is_adv else ''
+            if is_adv:
+                adv_set = True
+            right_html += (
+                f'<div{adv_id} style="background:{bg};border:1px solid {bd};border-radius:3px;'
+                f'padding:3px 5px;margin-bottom:3px;font-size:7px;line-height:1.35">'
+                f'<b style="font-size:7.5px;display:block;margin-bottom:1px">{_esc(cat)}</b>'
+                f'{cont_esc}</div>\n'
+            )
+    else:
+        right_html = (
+            '<div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;'
+            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">INDICAÇÃO</div>\n'
+            '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;'
+            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">ATENÇÃO</div>\n'
+            '<div id="adv-block" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;'
+            'padding:3px 5px;font-size:8px;min-height:36px">ADVERTÊNCIA</div>\n'
+        )
+        adv_set = True
+
+    if not adv_set:
+        right_html += '<div id="adv-block" style="height:0;overflow:hidden"></div>\n'
+
+    if tem_chorao:
+        right_html += (
+            '<div style="margin-top:3px;text-align:center;font-size:7px;color:#666;'
+            'padding:2px;background:#f0f0ff;border:1px dashed #9999cc;border-radius:3px">✂ chorão</div>\n'
+        )
+
+    left_nome_ref = (
+        f'<div style="font-size:7.5px;font-weight:bold;line-height:1.3;margin-bottom:2px">{nome}</div>\n'
+        f'<div style="font-size:7px;color:#555;margin-bottom:3px">Ref: {ref}'
+        f'{(" | Qtd: " + qtd) if qtd else ""}</div>\n'
+    )
+    left_cli_parts = []
+    if razao:
+        left_cli_parts.append(f'<span>{razao}</span>')
+    if cnpj:
+        left_cli_parts.append(f'CNPJ: {cnpj}')
+    if endereco:
+        left_cli_parts.append(endereco)
+    if origem:
+        left_cli_parts.append(f'Origem: {origem}')
+    if sac:
+        left_cli_parts.append(f'SAC: {sac}')
+    left_cli = '<br>'.join(left_cli_parts)
+
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:Arial,sans-serif;background:transparent;padding:2px}}
-#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;height:{ALT}px;position:relative;overflow:hidden;user-select:none}}
-#le{{width:{COL_E}px;min-width:{COL_E}px;height:{ALT}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px;position:relative;overflow:hidden}}
-#rd{{width:{COL_D}px;height:{ALT}px;padding:6px;position:relative;overflow:hidden}}
+#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;min-height:198px;position:relative;overflow:hidden;user-select:none;align-items:stretch}}
+#le{{width:{COL_E}px;min-width:{COL_E}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px 6px 26px 6px;position:relative}}
+#rd{{width:{COL_D}px;padding:6px;position:relative}}
 #pg{{position:absolute;left:{px_h}px;top:{px_v}px;width:{px_w}px;height:{px_hh}px;cursor:move;border:2px dashed #e8710a;z-index:20}}
 #rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#e8710a;cursor:se-resize;border-radius:0 0 3px 0}}
-#adv{{border:2px dashed #e8710a !important}}
+#bc{{position:absolute;bottom:5px;left:5px;right:5px;background:#ddd;height:16px;border-radius:2px;font-size:6px;text-align:center;line-height:16px;letter-spacing:2px}}
 #cd{{font-size:11px;color:#b85800;font-family:monospace;margin-top:5px;padding:4px 8px;background:#fff8f0;border-radius:3px;border:1px solid #f5d0a9;display:inline-block}}
 </style></head><body>
 <div id="lc">
   <div id="le">
-    <div style="background:#ccc;border-radius:2px;padding:2px 4px;font-size:8px;text-align:center;margin-bottom:4px">SELO INMETRO</div>
-    <div style="font-size:7px;color:#555;line-height:1.4">Importador: ...<br>Endereço: ...<br>CNPJ: ...<br>Origem: ...</div>
-    <div style="position:absolute;bottom:8px;left:6px;right:6px;background:#ddd;height:18px;border-radius:2px;font-size:7px;text-align:center;line-height:18px">||| CÓDIGO DE BARRAS |||</div>
+    <div style="background:#bbb;border-radius:2px;padding:2px 4px;font-size:7px;text-align:center;margin-bottom:3px;font-weight:bold">INMETRO</div>
+    {left_nome_ref}<div style="font-size:6.5px;color:#555;line-height:1.4">{left_cli}</div>
+    <div id="bc">||| BARCODE |||</div>
   </div>
   <div id="rd">
-    <div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">INDICAÇÃO</div>
-    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">ATENÇÃO</div>
-    <div id="adv" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;padding:3px 5px;font-size:9px;height:42px">ADVERTÊNCIA ← V=0</div>
+    {right_html}
     <div id="pg">{pilha_inner}<div id="rh"></div></div>
   </div>
 </div>
@@ -4993,10 +5071,12 @@ body{{font-family:Arial,sans-serif;background:transparent;padding:2px}}
   &nbsp;&nbsp;<span style="color:#888;font-size:10px">⟲ arraste · alça laranja=redimensionar</span></div>
 <script>
 (function(){{
-const S={S},CD={COL_D},AL={ALT},ADV={ADV_TOP};
+const S={S},CD={COL_D};
 const el=document.getElementById('pg'),rh=document.getElementById('rh');
+const rd=document.getElementById('rd');
 const ch=document.getElementById('ch'),cv=document.getElementById('cv');
 const cw=document.getElementById('cw'),chh=document.getElementById('chh');
+let ADV={ADV_FALLBACK};
 let dr=false,rs=false,sx,sy,sl,st2,sw,sh;
 function fmt(n){{return(Math.round(n*20)/20).toFixed(2)}}
 function upd(){{
@@ -5005,6 +5085,11 @@ function upd(){{
   cv.textContent=fmt((t-ADV)/S);
   cw.textContent=fmt(el.offsetWidth/S);chh.textContent=fmt(el.offsetHeight/S);
 }}
+window.addEventListener('load',function(){{
+  const advEl=document.getElementById('adv-block');
+  if(advEl){{ADV=advEl.offsetTop;el.style.top=(ADV+Math.round({pilha_v_cm}*S))+'px';}}
+  upd();
+}});
 el.addEventListener('mousedown',function(e){{
   if(e.target===rh)return;
   dr=true;sx=e.clientX;sy=e.clientY;
@@ -5017,13 +5102,15 @@ rh.addEventListener('mousedown',function(e){{
 }});
 document.addEventListener('mousemove',function(e){{
   if(dr){{
+    const rdH=rd.offsetHeight;
     let nl=Math.max(0,Math.min(CD-el.offsetWidth-2,sl+(e.clientX-sx)));
-    let nt=Math.max(ADV-S*2,Math.min(AL-el.offsetHeight-2,st2+(e.clientY-sy)));
+    let nt=Math.max(ADV-S*2,Math.min(rdH-el.offsetHeight-2,st2+(e.clientY-sy)));
     el.style.left=nl+'px';el.style.top=nt+'px';upd();
   }}else if(rs){{
+    const rdH=rd.offsetHeight;
     let nl=parseInt(el.style.left)||0,nt=parseInt(el.style.top)||0;
     let nw=Math.max(11,Math.min(CD-nl,sw+(e.clientX-sx)));
-    let nh=Math.max(11,Math.min(AL-nt,sh+(e.clientY-sy)));
+    let nh=Math.max(11,Math.min(rdH-nt,sh+(e.clientY-sy)));
     el.style.width=nw+'px';el.style.height=nh+'px';upd();
   }}
 }});
@@ -5035,56 +5122,145 @@ upd();
 
 def _html_drag_logo_canvas(
     logo_b64, logo_h_cm=0.5, logo_v_cm=5.0, logo_w_cm=2.0, logo_hh_cm=1.0,
-    tem_pilha=False, pilha_h_cm=1.767, pilha_v_cm=0.172
+    tem_pilha=False, pilha_h_cm=1.767, pilha_v_cm=0.172,
+    cliente_info=None, item_nome='', item_ref='', item_qtd='',
+    textos_dir=None, tem_chorao=False
 ):
-    """Canvas HTML com logo arrastável e redimensionável por mouse. 1cm=22px."""
+    """Canvas HTML com logo arrastável e redimensionável por mouse. 1cm=22px.
+    Renderiza conteúdo real do cliente/produto no preview."""
     S = 22
     COL_E = int(8 * S)
     COL_D = int(10 * S)
-    ALT = int(9 * S)
     px_h = int(logo_h_cm * S)
     px_v = int(logo_v_cm * S)
     px_w = max(22, int(logo_w_cm * S))
     px_hh = max(11, int(logo_hh_cm * S))
-    # Pilha: posição dentro do bloco ADVERTÊNCIA (aprox. 6+42+3+42+3=96px do topo)
-    adv_off = 96
     px_ph = int(pilha_h_cm * S)
     px_pv = int(pilha_v_cm * S)
-    pilha_html = (
-        f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
-        f'width:22px;height:20px;background:#fd7e14;border-radius:50%;'
-        f'display:flex;align-items:center;justify-content:center;font-size:11px;z-index:5;">⚡</div>'
-    ) if tem_pilha else ''
+
+    def _esc(s):
+        return str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('**', '')
+
+    ci = cliente_info or {}
+    razao = _esc(ci.get('razao_social', ''))[:55]
+    cnpj = _esc(ci.get('cnpj', ''))[:25]
+    endereco = _esc(ci.get('endereco', ''))[:70]
+    origem = _esc(ci.get('origem', ''))[:35]
+    sac = _esc(ci.get('sac', ''))[:55]
+    nome = _esc(item_nome)[:55]
+    ref = _esc(item_ref)[:20]
+    qtd = _esc(item_qtd)[:20]
+
+    blk_colors = {
+        'ATENÇÃO': ('#fff3cd', '#ffc107'),
+        'INDICAÇÃO': ('#d4edda', '#c3e6cb'),
+        'ADVERTÊNCIA': ('#f8d7da', '#f5c6cb'),
+        'CUIDADOS DE USO': ('#e2e3e5', '#c6c8ca'),
+        'COMPOSIÇÃO': ('#cfe2ff', '#b6d4fe'),
+    }
+
+    right_html = ''
+    adv_set = False
+    if textos_dir:
+        for cat, content in textos_dir:
+            bg, bd = blk_colors.get(cat.upper(), ('#e2e3e5', '#c6c8ca'))
+            cont_esc = _esc(content)
+            if len(cont_esc) > 220:
+                cont_esc = cont_esc[:220] + '…'
+            is_adv = (cat.upper() == 'ADVERTÊNCIA')
+            adv_id = ' id="adv-block"' if is_adv else ''
+            if is_adv:
+                adv_set = True
+            pilha_indicator = ''
+            if is_adv and tem_pilha:
+                pilha_indicator = (
+                    f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
+                    f'width:20px;height:18px;background:#fd7e14;border-radius:50%;'
+                    f'display:flex;align-items:center;justify-content:center;font-size:10px;z-index:5;opacity:0.85;">⚡</div>'
+                )
+            right_html += (
+                f'<div{adv_id} style="background:{bg};border:1px solid {bd};border-radius:3px;'
+                f'padding:3px 5px;margin-bottom:3px;font-size:7px;line-height:1.35;position:relative">'
+                f'<b style="font-size:7.5px;display:block;margin-bottom:1px">{_esc(cat)}</b>'
+                f'{cont_esc}{pilha_indicator}</div>\n'
+            )
+    else:
+        pilha_inner_html = (
+            f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
+            f'width:20px;height:18px;background:#fd7e14;border-radius:50%;'
+            f'display:flex;align-items:center;justify-content:center;font-size:10px;z-index:5;">⚡</div>'
+        ) if tem_pilha else ''
+        right_html = (
+            '<div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;'
+            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">INDICAÇÃO</div>\n'
+            '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;'
+            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">ATENÇÃO</div>\n'
+            f'<div id="adv-block" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;'
+            f'padding:3px 5px;font-size:8px;min-height:36px;position:relative">ADVERTÊNCIA{pilha_inner_html}</div>\n'
+        )
+        adv_set = True
+
+    if not adv_set:
+        pilha_fb = (
+            f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
+            f'width:20px;height:18px;background:#fd7e14;border-radius:50%;'
+            f'display:flex;align-items:center;justify-content:center;font-size:10px;">⚡</div>'
+        ) if tem_pilha else ''
+        right_html += f'<div id="adv-block" style="height:0;overflow:hidden;position:relative">{pilha_fb}</div>\n'
+
+    if tem_chorao:
+        right_html += (
+            '<div style="margin-top:3px;text-align:center;font-size:7px;color:#666;'
+            'padding:2px;background:#f0f0ff;border:1px dashed #9999cc;border-radius:3px">✂ chorão</div>\n'
+        )
+
+    left_nome_ref = (
+        f'<div style="font-size:7.5px;font-weight:bold;line-height:1.3;margin-bottom:2px">{nome}</div>\n'
+        f'<div style="font-size:7px;color:#555;margin-bottom:3px">Ref: {ref}'
+        f'{(" | Qtd: " + qtd) if qtd else ""}</div>\n'
+    )
+    left_cli_parts = []
+    if razao:
+        left_cli_parts.append(f'<span>{razao}</span>')
+    if cnpj:
+        left_cli_parts.append(f'CNPJ: {cnpj}')
+    if endereco:
+        left_cli_parts.append(endereco)
+    if origem:
+        left_cli_parts.append(f'Origem: {origem}')
+    if sac:
+        left_cli_parts.append(f'SAC: {sac}')
+    left_cli = '<br>'.join(left_cli_parts)
+
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:Arial,sans-serif;background:transparent;padding:2px}}
-#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;height:{ALT}px;position:relative;overflow:hidden;user-select:none}}
-#le{{width:{COL_E}px;min-width:{COL_E}px;height:{ALT}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px;position:relative;overflow:hidden}}
-#rd{{width:{COL_D}px;height:{ALT}px;padding:6px;position:relative;overflow:hidden}}
+#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;min-height:198px;position:relative;overflow:hidden;user-select:none;align-items:stretch}}
+#le{{width:{COL_E}px;min-width:{COL_E}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px 6px 26px 6px;position:relative}}
+#rd{{width:{COL_D}px;padding:6px;position:relative}}
 #lg{{position:absolute;left:{px_h}px;top:{px_v}px;width:{px_w}px;height:{px_hh}px;cursor:move;border:2px dashed #007bff;z-index:20}}
 #lg img{{width:100%;height:100%;object-fit:contain;pointer-events:none;display:block}}
 #rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#007bff;cursor:se-resize;border-radius:0 0 3px 0}}
+#bc{{position:absolute;bottom:5px;left:5px;right:5px;background:#ddd;height:16px;border-radius:2px;font-size:6px;text-align:center;line-height:16px;letter-spacing:2px}}
 #cd{{font-size:11px;color:#1a6bcc;font-family:monospace;margin-top:5px;padding:4px 8px;background:#f0f7ff;border-radius:3px;border:1px solid #c8dcf5;display:inline-block}}
 </style></head><body>
 <div id="lc">
   <div id="le">
-    <div style="background:#ccc;border-radius:2px;padding:2px 4px;font-size:8px;text-align:center;margin-bottom:4px">SELO INMETRO</div>
-    <div style="font-size:7px;color:#555;line-height:1.4">Importador: ...<br>Endereço: ...<br>CNPJ: ...<br>Origem: ...</div>
+    <div style="background:#bbb;border-radius:2px;padding:2px 4px;font-size:7px;text-align:center;margin-bottom:3px;font-weight:bold">INMETRO</div>
+    {left_nome_ref}<div style="font-size:6.5px;color:#555;line-height:1.4">{left_cli}</div>
+    <div id="bc">||| BARCODE |||</div>
     <div id="lg"><img src="data:image/png;base64,{logo_b64}"><div id="rh"></div></div>
-    <div style="position:absolute;bottom:8px;left:6px;right:6px;background:#ddd;height:18px;border-radius:2px;font-size:7px;text-align:center;line-height:18px">||| CÓDIGO DE BARRAS |||</div>
   </div>
   <div id="rd">
-    <div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">INDICAÇÃO</div>
-    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">ATENÇÃO</div>
-    <div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;padding:3px 5px;font-size:9px;height:42px;position:relative">ADVERTÊNCIA{pilha_html}</div>
+    {right_html}
   </div>
 </div>
 <div id="cd">🏷 H=<b id="ch">{logo_h_cm:.2f}</b>cm &nbsp; V=<b id="cv">{logo_v_cm:.2f}</b>cm &nbsp; Largura=<b id="cw">{logo_w_cm:.2f}</b>cm &nbsp; Altura=<b id="chh">{logo_hh_cm:.2f}</b>cm
   &nbsp;&nbsp;<span style="color:#888;font-size:10px">⟲ arraste · alça azul=redimensionar</span></div>
 <script>
 (function(){{
-const S={S},CE={COL_E},AL={ALT};
+const S={S},CE={COL_E};
 const el=document.getElementById('lg'),rh=document.getElementById('rh');
 const ch=document.getElementById('ch'),cv=document.getElementById('cv');
 const cw=document.getElementById('cw'),chh=document.getElementById('chh');
@@ -5107,13 +5283,15 @@ rh.addEventListener('mousedown',function(e){{
 }});
 document.addEventListener('mousemove',function(e){{
   if(dr){{
+    const leH=document.getElementById('le').offsetHeight;
     let nl=Math.max(0,Math.min(CE-el.offsetWidth-2,sl+(e.clientX-sx)));
-    let nt=Math.max(0,Math.min(AL-el.offsetHeight-2,st2+(e.clientY-sy)));
+    let nt=Math.max(0,Math.min(leH-el.offsetHeight-2,st2+(e.clientY-sy)));
     el.style.left=nl+'px';el.style.top=nt+'px';upd();
   }}else if(rs){{
+    const leH=document.getElementById('le').offsetHeight;
     let nl=parseInt(el.style.left)||0,nt=parseInt(el.style.top)||0;
     let nw=Math.max(22,Math.min(CE-nl,sw+(e.clientX-sx)));
-    let nh=Math.max(11,Math.min(AL-nt,sh+(e.clientY-sy)));
+    let nh=Math.max(11,Math.min(leH-nt,sh+(e.clientY-sy)));
     el.style.width=nw+'px';el.style.height=nh+'px';upd();
   }}
 }});
@@ -13184,6 +13362,24 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 import base64 as _b64_prev
                                 _logo_bytes_cur, _, _, _ = buscar_logo_cliente(_cliente_gerar)
 
+                                # Dados reais para o preview da etiqueta
+                                _cli_prev_data = buscar_cliente_etiqueta(_cliente_gerar)
+                                _textos_dir_prev = []
+                                for _cat_pp in _categorias_deste_tipo:
+                                    _titulo_pp = st.session_state.get(f"txt_{_i}_{_cat_pp}", "")
+                                    if _titulo_pp and _titulo_pp != _NENHUM_TEXTO and not _df_textos_todos.empty:
+                                        _m_pp = _df_textos_todos[
+                                            (_df_textos_todos['tipo'] == _tipo) &
+                                            (_df_textos_todos['categoria'] == _cat_pp) &
+                                            (_df_textos_todos['titulo'] == _titulo_pp)
+                                        ]
+                                        if not _m_pp.empty:
+                                            _textos_dir_prev.append((_cat_pp, str(_m_pp.iloc[0]['conteudo'])))
+                                _tem_corda_prev = bool(_item.get('corda', False))
+                                _tipo_chorao_prev = detectar_chorao_18m(_item.get('nome', ''), tem_corda=_tem_corda_prev)
+                                _idade_uni_cur = st.session_state.get(f"idadeuni_{_i}", 'ANOS')
+                                _tem_chorao_prev = bool(_tipo_chorao_prev == 'chorao18' or _idade_uni_cur == 'ANOS')
+
                                 # --- Posição da imagem de pilha (apenas itens pilha) ---
                                 if _tem_pilha_det:
                                     st.markdown("**📍 Posição e tamanho da imagem de pilha:**")
@@ -13200,9 +13396,15 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                     _pilha_drag = _html_drag_pilha_canvas(
                                         pilha_h_cm=_pp_h, pilha_v_cm=_pp_v,
                                         pilha_w_cm=_pp_w, pilha_hh_cm=_pp_hh,
-                                        pilha_b64=_pilha_b64_prev
+                                        pilha_b64=_pilha_b64_prev,
+                                        cliente_info=_cli_prev_data,
+                                        item_nome=_nome_curto,
+                                        item_ref=_ref_curta,
+                                        item_qtd=str(_item.get('qtd', '')),
+                                        textos_dir=_textos_dir_prev,
+                                        tem_chorao=_tem_chorao_prev,
                                     )
-                                    _stc_prev.html(_pilha_drag, height=255)
+                                    _stc_prev.html(_pilha_drag, height=430)
                                 else:
                                     _pp_h, _pp_v, _pp_w, _pp_hh = 1.767, 0.172, 1.0, 0.95
 
@@ -13225,9 +13427,15 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                             logo_h_cm=_lh, logo_v_cm=_lv,
                                             logo_w_cm=_lw, logo_hh_cm=_lhh,
                                             tem_pilha=_tem_pilha_det,
-                                            pilha_h_cm=_pp_h, pilha_v_cm=_pp_v
+                                            pilha_h_cm=_pp_h, pilha_v_cm=_pp_v,
+                                            cliente_info=_cli_prev_data,
+                                            item_nome=_nome_curto,
+                                            item_ref=_ref_curta,
+                                            item_qtd=str(_item.get('qtd', '')),
+                                            textos_dir=_textos_dir_prev,
+                                            tem_chorao=_tem_chorao_prev,
                                         )
-                                        _stc_prev.html(_drag_html, height=255)
+                                        _stc_prev.html(_drag_html, height=430)
 
                     with st.container(border=True):
                         st.markdown("##### 5️⃣ Gerar")
