@@ -629,6 +629,18 @@ def _preparar_schema(_db_version):
     )
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS logos_cliente (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente_apelido TEXT NOT NULL UNIQUE,
+        logo_bytes BLOB,
+        nome_arquivo TEXT,
+        pos_h_cm REAL DEFAULT 0.5,
+        pos_v_cm REAL DEFAULT 1.0,
+        data_atualizada TEXT
+    )
+    """)
+
     commit_seguro()
 
 _preparar_schema(st.session_state["db_version"])
@@ -4425,7 +4437,9 @@ def selo_docx_para_png(selo_docx_bytes, soffice_path, coletar_erro=None):
     return _selo_docx_para_png_metodo_antigo(selo_docx_bytes, soffice_path, coletar_erro=coletar_erro)
 
 
-def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, pilha_png=None, variante_selo=None):
+def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, pilha_png=None, variante_selo=None,
+                            pilha_pos_h_cm=1.767, pilha_pos_v_cm=0.172,
+                            logo_png=None, logo_pos_h_cm=0.5, logo_pos_v_cm=1.0):
     """Monta uma etiqueta (tabela 2 colunas) dentro do documento `doc`.
     Medidas extraídas do padrão real da empresa:
     - Fonte Arial 7pt (corpo), 8,5pt (prefixo ATENÇÃO/INDICAÇÃO/ADVERTÊNCIA e rodapé), 8pt (referência/nome)
@@ -4516,13 +4530,12 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         drawing.remove(inline)
         drawing.append(anchor)
 
-    def _tornar_imagem_flutuante_canto_superior_direito(run, doc_pr_id=200):
-        """Espelho do chorão: âncora flutuante no canto superior DIREITO da coluna,
-        wrapSquare wrapText="left" — o texto de ADVERTÊNCIA flui à esquerda da imagem.
-        Valores de posOffset extraídos do docx de referência (etiquetas_39_correto.docx):
-          positionH relativeFrom='column' posOffset=1616186 (≈4,49 cm da esquerda)
-          positionV relativeFrom='paragraph' posOffset=157480 (≈0,44 cm do topo)
-        Precisa ser o PRIMEIRO run do parágrafo (antes do texto)."""
+    def _tornar_imagem_flutuante_canto_superior_direito(run, doc_pr_id=200, pos_h_cm=1.767, pos_v_cm=0.172):
+        """Âncora flutuante no canto superior DIREITO da coluna (bateria/pilha).
+        pos_h_cm: offset horizontal a partir da coluna (cm). Default ≈ 1.77 cm.
+        pos_v_cm: offset vertical a partir do parágrafo (cm). Default ≈ 0.17 cm.
+        wrapSquare wrapText="left" — texto flui à esquerda da imagem."""
+        _EMU = 914400
         drawing = run._element.find(_qn('w:drawing'))
         inline = drawing.find(_qn('wp:inline'))
         filhos = {child.tag.split('}')[-1]: child for child in inline}
@@ -4544,14 +4557,14 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         positionH = _OxmlElement('wp:positionH')
         positionH.set('relativeFrom', 'column')
         posOffH = _OxmlElement('wp:posOffset')
-        posOffH.text = '1616186'
+        posOffH.text = str(int(pos_h_cm * _EMU))
         positionH.append(posOffH)
         anchor.append(positionH)
 
         positionV = _OxmlElement('wp:positionV')
         positionV.set('relativeFrom', 'paragraph')
         posOffV = _OxmlElement('wp:posOffset')
-        posOffV.text = '157480'
+        posOffV.text = str(int(pos_v_cm * _EMU))
         positionV.append(posOffV)
         anchor.append(positionV)
 
@@ -4564,6 +4577,62 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
 
         wrapSquare = _OxmlElement('wp:wrapSquare')
         wrapSquare.set('wrapText', 'left')
+        anchor.append(wrapSquare)
+
+        anchor.append(docPr)
+        if cNvGraphicFramePr is not None:
+            anchor.append(cNvGraphicFramePr)
+        anchor.append(graphic)
+
+        drawing.remove(inline)
+        drawing.append(anchor)
+
+    def _tornar_imagem_flutuante_xy(run, doc_pr_id=300, pos_h_cm=0.5, pos_v_cm=1.0, wrap_text='right'):
+        """Âncora flutuante em posição X/Y absoluta (cm) — usada para logos de clientes.
+        pos_h_cm: offset da esquerda da coluna. pos_v_cm: offset do topo do parágrafo.
+        wrap_text: 'right' (texto flui à direita) ou 'left' (flui à esquerda)."""
+        _EMU = 914400
+        drawing = run._element.find(_qn('w:drawing'))
+        inline = drawing.find(_qn('wp:inline'))
+        filhos = {child.tag.split('}')[-1]: child for child in inline}
+        extent = filhos['extent']
+        docPr = filhos['docPr']
+        cNvGraphicFramePr = filhos.get('cNvGraphicFramePr')
+        graphic = filhos['graphic']
+
+        anchor = _OxmlElement('wp:anchor')
+        for _attr, _val in [('distT', '0'), ('distB', '0'), ('distL', '57150'), ('distR', '57150'),
+                             ('simplePos', '0'), ('relativeHeight', str(251658240 + doc_pr_id)),
+                             ('behindDoc', '0'), ('locked', '0'), ('layoutInCell', '1'), ('allowOverlap', '1')]:
+            anchor.set(_attr, _val)
+
+        simplePos = _OxmlElement('wp:simplePos')
+        simplePos.set('x', '0'); simplePos.set('y', '0')
+        anchor.append(simplePos)
+
+        positionH = _OxmlElement('wp:positionH')
+        positionH.set('relativeFrom', 'column')
+        posOffH = _OxmlElement('wp:posOffset')
+        posOffH.text = str(int(pos_h_cm * _EMU))
+        positionH.append(posOffH)
+        anchor.append(positionH)
+
+        positionV = _OxmlElement('wp:positionV')
+        positionV.set('relativeFrom', 'paragraph')
+        posOffV = _OxmlElement('wp:posOffset')
+        posOffV.text = str(int(pos_v_cm * _EMU))
+        positionV.append(posOffV)
+        anchor.append(positionV)
+
+        anchor.append(extent)
+
+        effectExtent = _OxmlElement('wp:effectExtent')
+        for _attr in ('l', 't', 'r', 'b'):
+            effectExtent.set(_attr, '0')
+        anchor.append(effectExtent)
+
+        wrapSquare = _OxmlElement('wp:wrapSquare')
+        wrapSquare.set('wrapText', wrap_text)
         anchor.append(wrapSquare)
 
         anchor.append(docPr)
@@ -4604,6 +4673,18 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
     if selo_png:
         p0.alignment = _ALIGN.LEFT
         p0.add_run().add_picture(_Bio(selo_png), width=_Cm(LARG_SELO), height=_Cm(ALT_SELO))
+
+    # Logo do cliente: âncora flutuante na coluna esquerda, posição configurável
+    if logo_png:
+        _p_logo = cell_esq.add_paragraph()
+        _p_logo.paragraph_format.space_after = _Pt(0)
+        _run_logo = _p_logo.add_run()
+        _run_logo.add_picture(_Bio(logo_png), width=_Cm(2.0), height=_Cm(1.0))
+        _tornar_imagem_flutuante_xy(
+            _run_logo, doc_pr_id=400,
+            pos_h_cm=logo_pos_h_cm, pos_v_cm=logo_pos_v_cm,
+            wrap_text='right'
+        )
 
     def add_linha(cell, texto, tam=TAM_CORPO, bold_prefix=None, center=False, bold_all=False):
         pp = cell.add_paragraph()
@@ -4659,7 +4740,10 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         if pilha_png and dados.get('tipo') == 'pilha' and _bloco_up_check.startswith('ADVERTÊNCIA:'):
             _run_pilha = pb.add_run()
             _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(1.0), height=_Cm(0.95))
-            _tornar_imagem_flutuante_canto_superior_direito(_run_pilha, doc_pr_id=200)
+            _tornar_imagem_flutuante_canto_superior_direito(
+                _run_pilha, doc_pr_id=200,
+                pos_h_cm=pilha_pos_h_cm, pos_v_cm=pilha_pos_v_cm
+            )
 
         # Prefixos conhecidos: renderizados em TAM_PREFIXO (8,5pt) bold,
         # o restante do texto em TAM_CORPO (7pt) via markdown negrito normal.
@@ -4766,6 +4850,96 @@ def _montar_textos_direita(tipo, idade_formatada, titulos_escolhidos, textos_por
     if not blocos:
         blocos.append("**ATENÇÃO:** (cadastre e escolha os textos padrão na aba 'Textos padrão da etiqueta')")
     return blocos
+
+
+def _html_preview_label(
+    tem_pilha=False, pilha_pos_h=1.767, pilha_pos_v=0.172,
+    logo_b64=None, logo_pos_h=0.5, logo_pos_v=1.0,
+    textos=None
+):
+    """Retorna HTML com pré-visualização simplificada da etiqueta.
+    Escala: 1 cm = 22 px. Coluna esquerda ≈ 8 cm, direita ≈ 10 cm."""
+    S = 22  # px por cm
+    COL_E = 8 * S   # coluna esquerda
+    COL_D = 10 * S  # coluna direita
+    ALT   = 9 * S   # altura total
+
+    # blocos de texto direita (cores por categoria)
+    _CORES = {'INDICAÇÃO': '#d4edda', 'ATENÇÃO': '#fff3cd',
+              'ADVERTÊNCIA': '#f8d7da', 'default': '#e2e3e5'}
+    _blocos_html = ''
+    _bloco_tops = {}  # posição vertical aproximada de cada bloco
+    _y = 0
+    for bloco in (textos or ['INDICAÇÃO', 'ATENÇÃO', 'ADVERTÊNCIA']):
+        cat = next((c for c in _CORES if bloco.upper().startswith(c)), 'default')
+        _bloco_tops[cat] = _y
+        _h = max(30, min(60, len(bloco) // 3))
+        _cor = _CORES.get(cat, _CORES['default'])
+        _label = bloco[:40] + ('…' if len(bloco) > 40 else '')
+        _blocos_html += (
+            f'<div style="background:{_cor};border:1px solid #ccc;border-radius:3px;'
+            f'padding:3px 5px;margin-bottom:3px;font-size:9px;line-height:1.3;'
+            f'height:{_h}px;overflow:hidden;box-sizing:border-box;">{_label}</div>'
+        )
+        _y += _h + 4
+
+    # bateria (posição na coluna direita)
+    _px_pilha_h = int(pilha_pos_h * S)
+    _px_pilha_v = int(pilha_pos_v * S) + _bloco_tops.get('ADVERTÊNCIA', int(ALT * 0.55))
+    _pilha_html = ''
+    if tem_pilha:
+        _pilha_html = (
+            f'<div title="Imagem da pilha" style="position:absolute;'
+            f'left:{_px_pilha_h}px;top:{_px_pilha_v}px;'
+            f'width:22px;height:20px;background:#fd7e14;border-radius:50%;'
+            f'display:flex;align-items:center;justify-content:center;'
+            f'font-size:11px;z-index:10;box-shadow:0 1px 3px rgba(0,0,0,.3);">⚡</div>'
+        )
+
+    # logo (posição na coluna esquerda)
+    _logo_html = ''
+    if logo_b64:
+        _px_logo_h = int(logo_pos_h * S)
+        _px_logo_v = int(logo_pos_v * S)
+        _logo_html = (
+            f'<div title="Logo do cliente" style="position:absolute;'
+            f'left:{_px_logo_h}px;top:{_px_logo_v}px;'
+            f'width:44px;height:22px;z-index:10;box-shadow:0 1px 3px rgba(0,0,0,.2);">'
+            f'<img src="data:image/png;base64,{logo_b64}" '
+            f'style="width:100%;height:100%;object-fit:contain;"/></div>'
+        )
+
+    html = f"""
+<div style="display:flex;border:2px solid #333;border-radius:4px;
+            width:{COL_E+COL_D}px;height:{ALT}px;
+            font-family:Arial,sans-serif;position:relative;overflow:hidden;">
+  <!-- coluna esquerda -->
+  <div style="width:{COL_E}px;min-width:{COL_E}px;height:{ALT}px;
+              background:#f5f5f5;border-right:1px solid #aaa;
+              padding:6px;box-sizing:border-box;position:relative;overflow:hidden;">
+    <div style="background:#ccc;border-radius:2px;padding:2px 4px;
+                font-size:8px;text-align:center;margin-bottom:4px;">SELO INMETRO</div>
+    <div style="font-size:7px;color:#555;line-height:1.4;">
+      Importador: ...<br>Endereço: ...<br>CNPJ: ...<br>Origem: ...
+    </div>
+    {_logo_html}
+    <div style="position:absolute;bottom:8px;left:6px;right:6px;
+                background:#ddd;height:18px;border-radius:2px;
+                font-size:7px;text-align:center;line-height:18px;">||| CÓDIGO DE BARRAS |||</div>
+  </div>
+  <!-- coluna direita -->
+  <div style="width:{COL_D}px;height:{ALT}px;padding:6px;
+              box-sizing:border-box;position:relative;overflow:hidden;">
+    {_blocos_html}
+    {_pilha_html}
+  </div>
+</div>
+<div style="font-size:10px;color:#666;margin-top:4px;">
+  {'⚡ Pilha: H='+str(round(pilha_pos_h,2))+'cm  V='+str(round(pilha_pos_v,2))+'cm' if tem_pilha else ''}
+  {'&nbsp;&nbsp;🏷 Logo: H='+str(round(logo_pos_h,2))+'cm  V='+str(round(logo_pos_v,2))+'cm' if logo_b64 else ''}
+</div>
+"""
+    return html
 
 
 def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_fab, lote,
@@ -4894,9 +5068,17 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
             'tipo': cfg['tipo'],
         }
 
-        _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png,
-                                chorao_png=chorao_para_esse, pilha_png=pilha_png_bytes if cfg['tipo']=="pilha" else None,
-                                variante_selo=cfg['variante'])
+        _montar_etiqueta_no_doc(
+            doc, dados, selo_png, barcode_png,
+            chorao_png=chorao_para_esse,
+            pilha_png=pilha_png_bytes if cfg['tipo'] == "pilha" else None,
+            variante_selo=cfg['variante'],
+            pilha_pos_h_cm=cfg.get('pilha_pos_h', 1.767),
+            pilha_pos_v_cm=cfg.get('pilha_pos_v', 0.172),
+            logo_png=cfg.get('logo_png'),
+            logo_pos_h_cm=cfg.get('logo_pos_h', 0.5),
+            logo_pos_v_cm=cfg.get('logo_pos_v', 1.0),
+        )
 
         if idx < len(itens_config) - 1:
             if idx % 2 == 0:
@@ -4945,6 +5127,45 @@ def listar_clientes_etiqueta():
     SELECT id, apelido, razao_social, cnpj, endereco, sac, origem, data_atualizacao
     FROM clientes_etiqueta ORDER BY apelido
     """, conn)
+
+
+# ---- Logos de clientes ----
+
+def salvar_logo_cliente(apelido, logo_bytes, nome_arquivo, pos_h_cm=0.5, pos_v_cm=1.0):
+    agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    cursor.execute("""
+    INSERT INTO logos_cliente (cliente_apelido, logo_bytes, nome_arquivo, pos_h_cm, pos_v_cm, data_atualizada)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(cliente_apelido) DO UPDATE SET
+        logo_bytes=excluded.logo_bytes, nome_arquivo=excluded.nome_arquivo,
+        pos_h_cm=excluded.pos_h_cm, pos_v_cm=excluded.pos_v_cm,
+        data_atualizada=excluded.data_atualizada
+    """, (clean(apelido), logo_bytes, nome_arquivo, pos_h_cm, pos_v_cm, agora))
+    commit_seguro()
+
+
+def atualizar_posicao_logo_cliente(apelido, pos_h_cm, pos_v_cm):
+    cursor.execute(
+        "UPDATE logos_cliente SET pos_h_cm=?, pos_v_cm=? WHERE cliente_apelido=?",
+        (pos_h_cm, pos_v_cm, clean(apelido))
+    )
+    commit_seguro()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def buscar_logo_cliente(apelido):
+    row = cursor.execute(
+        "SELECT logo_bytes, nome_arquivo, pos_h_cm, pos_v_cm FROM logos_cliente WHERE cliente_apelido=?",
+        (clean(apelido),)
+    ).fetchone()
+    if not row:
+        return None, None, 0.5, 1.0
+    return row[0], row[1], row[2] or 0.5, row[3] or 1.0
+
+
+def excluir_logo_cliente(apelido):
+    cursor.execute("DELETE FROM logos_cliente WHERE cliente_apelido=?", (clean(apelido),))
+    commit_seguro()
 
 
 def buscar_registro_por_fabrica_familia(cliente_base, fabrica, familia):
@@ -12544,9 +12765,10 @@ Esse módulo está sendo construído por etapas:
 Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração da etiqueta não tem imagem pra usar.
 """)
 
-    tab_gerar, tab_clientes, tab_selos, tab_textos, tab_genericos, tab_lista = st.tabs([
+    tab_gerar, tab_clientes, tab_logos, tab_selos, tab_textos, tab_genericos, tab_lista = st.tabs([
         "🏭 Gerar etiquetas",
         "👤 Clientes (importadores)",
+        "🎨 Logos de clientes",
         "📌 Modelos de selo",
         "📝 Textos padrão da etiqueta",
         "🖼️ Assets Genéricos (chorão/pilha)",
@@ -12773,6 +12995,23 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 if not _categorias_deste_tipo:
                                     st.caption("Esse tipo não usa textos de ATENÇÃO/INDICAÇÃO configuráveis.")
 
+                                # --- Posição da imagem de pilha (apenas itens pilha) ---
+                                if _tem_pilha_det:
+                                    import streamlit.components.v1 as _stc_prev
+                                    import base64 as _b64_prev
+                                    st.markdown("**📍 Posição da imagem de pilha:**")
+                                    _pp_h = st.slider("Horizontal (cm, dentro da coluna direita)", 0.0, 5.0, 1.767, 0.05, key=f"pilha_pos_h_{_i}")
+                                    _pp_v = st.slider("Vertical (cm, do topo do bloco ADVERTÊNCIA)", -1.0, 5.0, 0.172, 0.05, key=f"pilha_pos_v_{_i}")
+                                    _pilha_bytes_prev, _ = buscar_asset_generico("pilha")
+                                    # Preview logo do cliente (se houver) junto com pilha
+                                    _logo_bytes_prev, _, _logo_h_prev, _logo_v_prev = buscar_logo_cliente(_cliente_gerar)
+                                    _logo_b64_prev = _b64_prev.b64encode(_logo_bytes_prev).decode() if _logo_bytes_prev else None
+                                    _prev = _html_preview_label(
+                                        tem_pilha=True, pilha_pos_h=_pp_h, pilha_pos_v=_pp_v,
+                                        logo_b64=_logo_b64_prev, logo_pos_h=_logo_h_prev, logo_pos_v=_logo_v_prev
+                                    )
+                                    _stc_prev.html(_prev, height=240)
+
                     with st.container(border=True):
                         st.markdown("##### 5️⃣ Gerar")
                         if st.button("🏭 Gerar etiquetas (Word + PDF)", type="primary", key="btn_gerar_lote"):
@@ -12780,6 +13019,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             if not _cli:
                                 st.error("Cliente não encontrado.")
                             else:
+                                _logo_bytes_gen, _, _logo_pos_h_gen, _logo_pos_v_gen = buscar_logo_cliente(_cliente_gerar)
                                 _itens_config = []
                                 for _i, _item in enumerate(_itens_lidos):
                                     _tipo_item = st.session_state.get(f"tipo_{_i}", "padrao")
@@ -12796,6 +13036,11 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         'idade_num': st.session_state.get(f"idadenum_{_i}", 3),
                                         'idade_uni': st.session_state.get(f"idadeuni_{_i}", "ANOS"),
                                         'titulos_texto': _titulos_texto,
+                                        'pilha_pos_h': st.session_state.get(f"pilha_pos_h_{_i}", 1.767),
+                                        'pilha_pos_v': st.session_state.get(f"pilha_pos_v_{_i}", 0.172),
+                                        'logo_png': _logo_bytes_gen,
+                                        'logo_pos_h': _logo_pos_h_gen,
+                                        'logo_pos_v': _logo_pos_v_gen,
                                     })
                                 _chorao_bytes, _ = buscar_asset_generico("chorao")
                                 _pilha_bytes, _ = buscar_asset_generico("pilha")
@@ -12919,6 +13164,65 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                     st.session_state.pop('cli_editar_apelido', None)
                     st.session_state.pop('cli_form_modo', None)
                     st.rerun()
+
+    with tab_logos:
+        st.subheader("Logos de clientes")
+        st.caption("Vincule uma logo a cada cliente. Nas etiquetas geradas para esse cliente, a logo aparece automaticamente na posição que você configurar.")
+
+        _clientes_logo = listar_clientes_etiqueta()
+        if _clientes_logo.empty:
+            st.info("Nenhum cliente cadastrado. Adicione clientes na aba 'Clientes'.")
+        else:
+            _apelidos_logo = list(_clientes_logo['apelido'])
+            _cli_sel_logo = st.selectbox("Selecionar cliente", _apelidos_logo, key="sel_cliente_logo")
+
+            if _cli_sel_logo:
+                _logo_bytes, _logo_nome, _logo_pos_h_db, _logo_pos_v_db = buscar_logo_cliente(_cli_sel_logo)
+
+                col_logo1, col_logo2 = st.columns([1, 2])
+                with col_logo1:
+                    st.markdown("**Logo atual:**")
+                    if _logo_bytes:
+                        st.image(_logo_bytes, caption=_logo_nome or "", width=160)
+                    else:
+                        st.info("Sem logo cadastrada.")
+                    _novo_logo = st.file_uploader("Enviar/substituir logo", type=["png", "jpg", "jpeg"], key="upload_logo_cli")
+                    if _novo_logo and st.button("💾 Salvar logo", key="btn_salvar_logo_cli"):
+                        _novo_logo.seek(0)
+                        salvar_logo_cliente(_cli_sel_logo, _novo_logo.read(), _novo_logo.name,
+                                            pos_h_cm=_logo_pos_h_db, pos_v_cm=_logo_pos_v_db)
+                        st.success("Logo salva ✅")
+                        st.cache_data.clear()
+                        st.rerun()
+                    if _logo_bytes and st.button("🗑️ Remover logo", key="btn_excluir_logo_cli"):
+                        excluir_logo_cliente(_cli_sel_logo)
+                        st.success("Logo removida ✅")
+                        st.cache_data.clear()
+                        st.rerun()
+
+                with col_logo2:
+                    if _logo_bytes:
+                        st.markdown("**Posição na etiqueta:**")
+                        st.caption("Ajuste os sliders e veja a pré-visualização. Clique em 'Salvar posição' para fixar.")
+                        _ph = st.slider("Horizontal (cm, da esquerda da coluna esq.)", 0.0, 7.5, float(_logo_pos_h_db), 0.1, key="logo_pos_h_slider")
+                        _pv = st.slider("Vertical (cm, do topo da coluna esq.)", 0.0, 8.0, float(_logo_pos_v_db), 0.1, key="logo_pos_v_slider")
+
+                        import base64 as _b64
+                        _logo_b64 = _b64.b64encode(_logo_bytes).decode()
+                        _prev_html = _html_preview_label(
+                            tem_pilha=False, logo_b64=_logo_b64,
+                            logo_pos_h=_ph, logo_pos_v=_pv
+                        )
+                        import streamlit.components.v1 as _stc
+                        _stc.html(_prev_html, height=230)
+
+                        if st.button("💾 Salvar posição", key="btn_salvar_pos_logo"):
+                            atualizar_posicao_logo_cliente(_cli_sel_logo, _ph, _pv)
+                            st.success("Posição salva ✅")
+                            st.cache_data.clear()
+                            st.rerun()
+                    else:
+                        st.info("Faça upload de uma logo para configurar a posição.")
 
     with tab_selos:
         st.subheader("Modelos de selo (Word editável)")
