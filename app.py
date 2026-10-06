@@ -5364,6 +5364,306 @@ upd();
 </script></body></html>"""
 
 
+def _html_drag_etiqueta_canvas(
+    tipo_etiqueta='padrao',
+    pilha_b64=None, pilha_h_cm=1.767, pilha_v_cm=0.172, pilha_w_cm=1.0, pilha_hh_cm=0.95,
+    logo_b64=None, logo_h_cm=0.5, logo_v_cm=5.0, logo_w_cm=2.0, logo_hh_cm=1.0,
+    cliente_info=None, item_nome='', item_ref='', item_qtd='',
+    textos_dir=None, tem_chorao=False,
+):
+    """Canvas unificado: pilha (col. direita) + logo (livre) ambos arrastáveis.
+    Tabela fiel 2×5.74cm, S=36px/cm. Só os elementos passados como não-None aparecem."""
+    S = 36
+    COL = int(5.74 * S)   # 206 px
+    TBL_W = COL * 2 + 2   # 414 px
+    SEAL_W = min(int(5.54 * S), COL - 8)
+    SEAL_H = int(2.5  * S)
+    BAR_W  = min(int(5.34 * S), COL - 8)
+    BAR_H  = int(2.24 * S)
+    ADV_FALLBACK = SEAL_H + 120
+
+    tem_pilha = pilha_b64 is not None
+    tem_logo  = logo_b64  is not None
+
+    px_ph = int(pilha_h_cm * S)
+    px_pv_init = ADV_FALLBACK + int(pilha_v_cm * S)
+    px_pw  = max(11, int(pilha_w_cm  * S))
+    px_phh = max(11, int(pilha_hh_cm * S))
+    pilha_left_init = COL + px_ph
+
+    px_lh  = int(logo_h_cm  * S)
+    px_lv  = int(logo_v_cm  * S)
+    px_lw  = max(11, int(logo_w_cm  * S))
+    px_lhh = max(11, int(logo_hh_cm * S))
+
+    def _esc(s):
+        return str(s).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('**','')
+
+    ci = cliente_info or {}
+    razao    = _esc(ci.get('razao_social', ''))
+    cnpj     = _esc(ci.get('cnpj',         ''))
+    endereco = _esc(ci.get('endereco',      ''))
+    origem   = _esc(ci.get('origem',        ''))
+    sac      = _esc(ci.get('sac',           ''))
+    nome     = _esc(item_nome)
+    ref      = _esc(item_ref)
+    qtd      = _esc(item_qtd)
+
+    ref_barras = (
+        f'<p style="font-family:Arial,sans-serif;font-size:11px;font-weight:bold;'
+        f'text-align:center;margin:5px 0 1px">{ref} - {nome}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;'
+        f'text-align:center;margin:0 0 3px">MARCA: (marca)</p>'
+        f'<div style="background:#ccc;width:{BAR_W}px;height:{BAR_H}px;max-width:100%;'
+        f'margin:0 auto;display:flex;align-items:center;justify-content:center;'
+        f'font-size:8px;color:#555;letter-spacing:3px;border:1px solid #999">'
+        f'||| CÓDIGO DE BARRAS |||</div>'
+    )
+
+    esq = (
+        f'<div style="background:#d9d9d9;width:{SEAL_W}px;height:{SEAL_H}px;max-width:100%;'
+        f'display:flex;align-items:center;justify-content:center;font-size:9px;color:#444;'
+        f'border:1px solid #bbb;margin-bottom:3px">SELO INMETRO</div>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'<b>Importador:</b> {razao}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'{endereco}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'CNPJ: {cnpj} / Origem: {origem}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px;'
+        f'border-top:1px solid #888;padding-top:2px">Quantidade: {qtd}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px;'
+        f'border-top:1px solid #888;padding-top:2px">Data de Fabricação: [data] / Lote: [lote]</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'Data de validade: Indeterminado</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0">'
+        f'SAC: {sac}</p>'
+    )
+    if tipo_etiqueta == 'pilha':
+        esq += ref_barras
+
+    dir_html = ''
+    adv_set = False
+    if tem_chorao:
+        dir_html += (
+            '<div style="float:left;width:26px;height:28px;background:#444;border-radius:50%;'
+            'display:flex;align-items:center;justify-content:center;font-size:6px;color:#fff;'
+            'text-align:center;line-height:1.15;margin:0 3px 2px 0">-3<br>anos</div>'
+        )
+    if textos_dir:
+        for idx2, (cat, content) in enumerate(textos_dir):
+            cont = _esc(content)
+            is_adv = (cat.upper() == 'ADVERTÊNCIA')
+            adv_id = ' id="adv-block"' if is_adv else ''
+            if is_adv:
+                adv_set = True
+            bord = 'border-top:1px solid #888;padding-top:2px;margin-top:1px;' if idx2 > 0 else ''
+            dir_html += (
+                f'<p{adv_id} style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+                f'margin:0 0 2px;{bord}"><b style="font-size:11px">{_esc(cat)}:</b> {cont}</p>\n'
+            )
+    else:
+        dir_html += (
+            '<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0 0 2px;min-height:28px"><b style="font-size:11px">ATENÇÃO:</b> (não selecionado)</p>\n'
+            '<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0 0 2px;min-height:28px;border-top:1px solid #888;padding-top:2px">'
+            '<b style="font-size:11px">INDICAÇÃO:</b> (não selecionado)</p>\n'
+            '<p id="adv-block" style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0;min-height:28px;border-top:1px solid #888;padding-top:2px">'
+            '<b style="font-size:11px">ADVERTÊNCIA:</b> (não selecionado)</p>\n'
+        )
+        adv_set = True
+    if not adv_set:
+        dir_html += '<p id="adv-block" style="height:0;margin:0"></p>\n'
+    if tipo_etiqueta != 'pilha':
+        dir_html += ref_barras
+
+    footer = '&ldquo;GUARDAR A EMBALAGEM POR CONTER INFORMAÇÕES IMPORTANTES&rdquo;'
+
+    # Draggable pilha element (positioned over wrap)
+    if tem_pilha:
+        if pilha_b64:
+            p_inner = (
+                f'<img src="data:image/png;base64,{pilha_b64}" '
+                f'style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">'
+            )
+        else:
+            p_inner = (
+                '<div style="width:100%;height:100%;background:#fd7e14;border-radius:50%;'
+                'display:flex;align-items:center;justify-content:center;font-size:12px;'
+                'pointer-events:none;color:#fff">⚡</div>'
+            )
+        pilha_el = (
+            f'<div id="pg" style="position:absolute;left:{pilha_left_init}px;top:{px_pv_init}px;'
+            f'width:{px_pw}px;height:{px_phh}px;cursor:move;border:2px dashed #e8710a;z-index:20">'
+            f'{p_inner}'
+            f'<div id="prh" style="position:absolute;bottom:-1px;right:-1px;width:12px;'
+            f'height:12px;background:#e8710a;cursor:se-resize"></div></div>'
+        )
+    else:
+        pilha_el = ''
+
+    # Draggable logo element (positioned over wrap, freely anywhere)
+    if tem_logo:
+        logo_el = (
+            f'<div id="lg" style="position:absolute;left:{px_lh}px;top:{px_lv}px;'
+            f'width:{px_lw}px;height:{px_lhh}px;cursor:move;border:2px dashed #007bff;z-index:21">'
+            f'<img src="data:image/png;base64,{logo_b64}" '
+            f'style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">'
+            f'<div id="lrh" style="position:absolute;bottom:-1px;right:-1px;width:12px;'
+            f'height:12px;background:#007bff;cursor:se-resize"></div></div>'
+        )
+    else:
+        logo_el = ''
+
+    # Coordinate bar
+    coord_parts = []
+    if tem_pilha:
+        coord_parts.append(
+            f'⚡ H=<b id="pch">{pilha_h_cm:.2f}</b>cm &nbsp;'
+            f'V=<b id="pcv">{pilha_v_cm:.2f}</b>cm &nbsp;'
+            f'W=<b id="pcw">{pilha_w_cm:.2f}</b>cm &nbsp;'
+            f'A=<b id="pca">{pilha_hh_cm:.2f}</b>cm'
+        )
+    if tem_logo:
+        coord_parts.append(
+            f'🏷 H=<b id="lch">{logo_h_cm:.2f}</b>cm &nbsp;'
+            f'V=<b id="lcv">{logo_v_cm:.2f}</b>cm &nbsp;'
+            f'W=<b id="lcw">{logo_w_cm:.2f}</b>cm &nbsp;'
+            f'A=<b id="lca">{logo_hh_cm:.2f}</b>cm'
+        )
+    coord_html = ' &nbsp;|&nbsp; '.join(coord_parts)
+    coord_color = '#1a6bcc' if not tem_pilha else ('#b85800' if not tem_logo else '#333')
+
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}}
+#lbl{{border-collapse:collapse;table-layout:fixed;width:{TBL_W}px}}
+#lbl td{{border:1px solid #000;padding:3px 4px;vertical-align:top;overflow:hidden;width:{COL}px}}
+#foot{{text-align:center;font-family:Arial,sans-serif;font-size:11px;font-weight:bold;padding:3px 4px}}
+#wrap{{position:relative;display:inline-block}}
+#cd{{font-size:11px;color:{coord_color};font-family:monospace;margin-top:4px;padding:3px 7px;
+  background:#f8f8f8;border-radius:3px;border:1px solid #ddd;display:inline-block}}
+</style></head><body>
+<div id="wrap">
+<table id="lbl">
+<tr>
+  <td id="cl">{esq}</td>
+  <td id="cr">{dir_html}</td>
+</tr>
+<tr><td colspan="2" id="foot">{footer}</td></tr>
+</table>
+{pilha_el}{logo_el}
+</div>
+<div id="cd">{coord_html}
+  &nbsp;&nbsp;<span style="color:#888;font-size:10px">arraste · alça=redimensionar</span></div>
+<script>
+(function(){{
+const S={S},COL={COL},TBL_W={TBL_W};
+const wrap=document.getElementById('wrap');
+let ADV={ADV_FALLBACK};
+function fmt(n){{return(Math.round(n*20)/20).toFixed(2)}}
+
+// Shared drag state: only one element active at a time
+let cur=null; // {{el,mode,sx,sy,sl,st,sw,sh,upd,minL,maxLfn,minT,maxTfn}}
+
+function startDrag(el,e,upd,minL,maxLfn,minT,maxTfn){{
+  cur={{el,mode:'d',sx:e.clientX,sy:e.clientY,
+    sl:parseInt(el.style.left)||0,st:parseInt(el.style.top)||0,
+    upd,minL,maxLfn,minT,maxTfn}};
+  e.preventDefault();
+}}
+function startResize(el,e,upd,minL,maxLfn,minT,maxTfn){{
+  cur={{el,mode:'r',sx:e.clientX,sy:e.clientY,
+    sl:parseInt(el.style.left)||0,st:parseInt(el.style.top)||0,
+    sw:el.offsetWidth,sh:el.offsetHeight,
+    upd,minL,maxLfn,minT,maxTfn}};
+  e.preventDefault();e.stopPropagation();
+}}
+document.addEventListener('mousemove',function(e){{
+  if(!cur)return;
+  const wH=wrap.offsetHeight;
+  if(cur.mode==='d'){{
+    let nl=Math.max(cur.minL,Math.min(cur.maxLfn()-cur.el.offsetWidth-2,cur.sl+(e.clientX-cur.sx)));
+    let nt=Math.max(cur.minT,Math.min(wH-cur.el.offsetHeight-2,cur.st+(e.clientY-cur.sy)));
+    cur.el.style.left=nl+'px';cur.el.style.top=nt+'px';cur.upd();
+  }}else{{
+    let nl=parseInt(cur.el.style.left)||0,nt=parseInt(cur.el.style.top)||0;
+    let nw=Math.max(11,Math.min(TBL_W-nl,cur.sw+(e.clientX-cur.sx)));
+    let nh=Math.max(11,Math.min(wH-nt,cur.sh+(e.clientY-cur.sy)));
+    cur.el.style.width=nw+'px';cur.el.style.height=nh+'px';cur.upd();
+  }}
+}});
+document.addEventListener('mouseup',function(){{cur=null;}});
+
+// --- Pilha ---
+(function(){{
+  const el=document.getElementById('pg');if(!el)return;
+  const rh=document.getElementById('prh');
+  const pch=document.getElementById('pch'),pcv=document.getElementById('pcv');
+  const pcw=document.getElementById('pcw'),pca=document.getElementById('pca');
+  function upd(){{
+    const l=parseInt(el.style.left)||0,t=parseInt(el.style.top)||0;
+    if(pch)pch.textContent=fmt((l-COL)/S);
+    if(pcv)pcv.textContent=fmt((t-ADV)/S);
+    if(pcw)pcw.textContent=fmt(el.offsetWidth/S);
+    if(pca)pca.textContent=fmt(el.offsetHeight/S);
+  }}
+  el.addEventListener('mousedown',function(e){{
+    if(e.target===rh)return;
+    startDrag(el,e,upd,COL,()=>TBL_W,0,()=>9999);
+  }});
+  if(rh)rh.addEventListener('mousedown',function(e){{
+    startResize(el,e,upd,COL,()=>TBL_W,0,()=>9999);
+  }});
+  upd();
+}})();
+
+// --- Logo ---
+(function(){{
+  const el=document.getElementById('lg');if(!el)return;
+  const rh=document.getElementById('lrh');
+  const lch=document.getElementById('lch'),lcv=document.getElementById('lcv');
+  const lcw=document.getElementById('lcw'),lca=document.getElementById('lca');
+  function upd(){{
+    const l=parseInt(el.style.left)||0,t=parseInt(el.style.top)||0;
+    if(lch)lch.textContent=fmt(l/S);
+    if(lcv)lcv.textContent=fmt(t/S);
+    if(lcw)lcw.textContent=fmt(el.offsetWidth/S);
+    if(lca)lca.textContent=fmt(el.offsetHeight/S);
+  }}
+  el.addEventListener('mousedown',function(e){{
+    if(e.target===rh)return;
+    startDrag(el,e,upd,0,()=>TBL_W,0,()=>9999);
+  }});
+  if(rh)rh.addEventListener('mousedown',function(e){{
+    startResize(el,e,upd,0,()=>TBL_W,0,()=>9999);
+  }});
+  upd();
+}})();
+
+// ADV recalc after layout
+window.addEventListener('load',function(){{
+  const advEl=document.getElementById('adv-block');
+  if(advEl){{
+    const wR=wrap.getBoundingClientRect(),aR=advEl.getBoundingClientRect();
+    ADV=aR.top-wR.top;
+    const pg=document.getElementById('pg');
+    if(pg){{
+      pg.style.top=(ADV+Math.round({pilha_v_cm}*S))+'px';
+      const pch=document.getElementById('pch'),pcv=document.getElementById('pcv');
+      const l=parseInt(pg.style.left)||0,t=parseInt(pg.style.top)||0;
+      if(pch)pch.textContent=fmt((l-COL)/S);
+      if(pcv)pcv.textContent=fmt((t-ADV)/S);
+    }}
+  }}
+}});
+}})();
+</script></body></html>"""
+
+
 def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_fab, lote,
                           cliente_base_registro, chorao_png_bytes=None, pilha_png_bytes=None,
                           chorao18_png_bytes=None):
@@ -13444,6 +13744,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 _tem_chorao_prev = bool(_tipo_chorao_prev == 'chorao18' or _idade_uni_cur == 'ANOS')
 
                                 # --- Posição da imagem de pilha (apenas itens pilha) ---
+                                _pilha_b64_prev = None
                                 if _tem_pilha_det:
                                     st.markdown("**📍 Posição e tamanho da imagem de pilha:**")
                                     _pc1, _pc2 = st.columns(2)
@@ -13455,53 +13756,45 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         _pp_hh = st.number_input("Altura (cm)", 0.3, 4.0, 0.95, 0.05, key=f"pilha_hh_{_i}", format="%.2f")
                                     _pilha_bytes_prev2, _ = buscar_asset_generico("pilha")
                                     _pilha_b64_prev = _b64_prev.b64encode(_pilha_bytes_prev2).decode() if _pilha_bytes_prev2 else None
-                                    st.caption("💡 Arraste a imagem no preview · alça laranja = redimensionar · leia valores e ajuste os campos acima para posição exata.")
-                                    _pilha_drag = _html_drag_pilha_canvas(
+                                else:
+                                    _pp_h, _pp_v, _pp_w, _pp_hh = 1.767, 0.172, 1.0, 0.95
+
+                                # --- Logo do cliente ---
+                                _usar_logo_i = False
+                                _lh, _lv, _lw, _lhh = 0.5, 5.0, 2.0, 1.0
+                                _logo_b64_for_canvas = None
+                                if _logo_bytes_cur:
+                                    st.markdown("**🎨 Logo do cliente:**")
+                                    _usar_logo_i = st.checkbox("📌 Adicionar logo nesta etiqueta", value=False, key=f"usar_logo_{_i}")
+                                    if _usar_logo_i:
+                                        _logo_b64_for_canvas = _b64_prev.b64encode(_logo_bytes_cur).decode()
+                                        _lc1, _lc2 = st.columns(2)
+                                        with _lc1:
+                                            _lh = st.number_input("H (cm, da esquerda)", 0.0, 12.0, 0.5, 0.05, key=f"logo_pos_h_{_i}", format="%.2f")
+                                            _lv = st.number_input("V (cm, do topo)", 0.0, 15.0, 5.0, 0.05, key=f"logo_pos_v_{_i}", format="%.2f")
+                                        with _lc2:
+                                            _lw = st.number_input("Largura (cm)", 0.5, 11.0, 2.0, 0.05, key=f"logo_w_{_i}", format="%.2f")
+                                            _lhh = st.number_input("Altura (cm)", 0.3, 8.0, 1.0, 0.05, key=f"logo_hh_{_i}", format="%.2f")
+
+                                # --- Canvas unificado: pilha + logo no mesmo preview ---
+                                if _tem_pilha_det or _usar_logo_i:
+                                    st.caption("💡 Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar · leia valores e ajuste os campos acima para posição exata.")
+                                    _canvas_html = _html_drag_etiqueta_canvas(
+                                        tipo_etiqueta=_tipo,
+                                        pilha_b64=_pilha_b64_prev if _tem_pilha_det else None,
                                         pilha_h_cm=_pp_h, pilha_v_cm=_pp_v,
                                         pilha_w_cm=_pp_w, pilha_hh_cm=_pp_hh,
-                                        pilha_b64=_pilha_b64_prev,
+                                        logo_b64=_logo_b64_for_canvas,
+                                        logo_h_cm=_lh, logo_v_cm=_lv,
+                                        logo_w_cm=_lw, logo_hh_cm=_lhh,
                                         cliente_info=_cli_prev_data,
                                         item_nome=_nome_curto,
                                         item_ref=_ref_curta,
                                         item_qtd=str(_item.get('qtd', '')),
                                         textos_dir=_textos_dir_prev,
                                         tem_chorao=_tem_chorao_prev,
-                                        tipo_etiqueta=_tipo,
                                     )
-                                    _stc_prev.html(_pilha_drag, height=520)
-                                else:
-                                    _pp_h, _pp_v, _pp_w, _pp_hh = 1.767, 0.172, 1.0, 0.95
-
-                                # --- Logo do cliente ---
-                                if _logo_bytes_cur:
-                                    st.markdown("**🎨 Logo do cliente:**")
-                                    _usar_logo_i = st.checkbox("📌 Adicionar logo nesta etiqueta", value=False, key=f"usar_logo_{_i}")
-                                    if _usar_logo_i:
-                                        _logo_b64_cur = _b64_prev.b64encode(_logo_bytes_cur).decode()
-                                        _lc1, _lc2 = st.columns(2)
-                                        with _lc1:
-                                            _lh = st.number_input("H (cm, da esquerda)", 0.0, 8.0, 0.5, 0.05, key=f"logo_pos_h_{_i}", format="%.2f")
-                                            _lv = st.number_input("V (cm, do topo)", 0.0, 9.0, 5.0, 0.05, key=f"logo_pos_v_{_i}", format="%.2f")
-                                        with _lc2:
-                                            _lw = st.number_input("Largura (cm)", 0.5, 7.0, 2.0, 0.05, key=f"logo_w_{_i}", format="%.2f")
-                                            _lhh = st.number_input("Altura (cm)", 0.3, 4.0, 1.0, 0.05, key=f"logo_hh_{_i}", format="%.2f")
-                                        st.caption("💡 Arraste a logo no preview · alça azul canto inferior direito = redimensionar · leia H/V/Largura/Altura e ajuste os campos acima para posição exata.")
-                                        _drag_html = _html_drag_logo_canvas(
-                                            _logo_b64_cur,
-                                            logo_h_cm=_lh, logo_v_cm=_lv,
-                                            logo_w_cm=_lw, logo_hh_cm=_lhh,
-                                            tem_pilha=_tem_pilha_det,
-                                            pilha_h_cm=_pp_h, pilha_v_cm=_pp_v,
-                                            pilha_b64=_pilha_b64_prev,
-                                            cliente_info=_cli_prev_data,
-                                            item_nome=_nome_curto,
-                                            item_ref=_ref_curta,
-                                            item_qtd=str(_item.get('qtd', '')),
-                                            textos_dir=_textos_dir_prev,
-                                            tem_chorao=_tem_chorao_prev,
-                                            tipo_etiqueta=_tipo,
-                                        )
-                                        _stc_prev.html(_drag_html, height=520)
+                                    _stc_prev.html(_canvas_html, height=520)
 
                     with st.container(border=True):
                         st.markdown("##### 5️⃣ Gerar")
