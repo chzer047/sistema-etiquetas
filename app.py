@@ -4948,132 +4948,158 @@ def _html_drag_pilha_canvas(
     pilha_h_cm=1.767, pilha_v_cm=0.172, pilha_w_cm=1.0, pilha_hh_cm=0.95,
     pilha_b64=None,
     cliente_info=None, item_nome='', item_ref='', item_qtd='',
-    textos_dir=None, tem_chorao=False
+    textos_dir=None, tem_chorao=False, tipo_etiqueta='pilha',
 ):
-    """Canvas HTML com imagem de pilha arrastável na coluna direita.
-    H = da esquerda da coluna direita; V = do topo do bloco ADVERTÊNCIA. 1cm=22px.
-    Renderiza conteúdo real do cliente/produto no preview."""
-    S = 22
-    COL_E = int(8 * S)
-    COL_D = int(10 * S)
-    ADV_FALLBACK = 96
-    px_h = int(pilha_h_cm * S)
-    px_v = ADV_FALLBACK + int(pilha_v_cm * S)
-    px_w = max(11, int(pilha_w_cm * S))
+    """Canvas HTML fiel ao layout real da etiqueta Word.
+    Tabela 2 cols × 5.74cm cada + rodapé mesclado (Table Grid, Arial 7pt/8.5pt).
+    Pilha: flutuante na col. direita — H da esq. da col., V do topo ADVERTÊNCIA."""
+    S = 36               # px/cm  (≈ 91 dpi — fiel às proporções do Word)
+    COL = int(5.74 * S)  # 206 px por coluna
+    SEAL_W = min(int(5.54 * S), COL - 8)  # 199 px ≤ largura útil da célula
+    SEAL_H = int(2.5  * S)   # 90 px
+    BAR_W  = min(int(5.34 * S), COL - 8)  # 192 px
+    BAR_H  = int(2.24 * S)   # 80 px
+
+    px_h  = int(pilha_h_cm * S)
+    px_w  = max(11, int(pilha_w_cm  * S))
     px_hh = max(11, int(pilha_hh_cm * S))
+    ADV_FALLBACK = SEAL_H + 120          # estimativa antes do JS calcular
+    px_v_init = ADV_FALLBACK + int(pilha_v_cm * S)
 
     def _esc(s):
-        return str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('**', '')
+        return str(s).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('**','')
 
     ci = cliente_info or {}
-    razao = _esc(ci.get('razao_social', ''))[:55]
-    cnpj = _esc(ci.get('cnpj', ''))[:25]
-    endereco = _esc(ci.get('endereco', ''))[:70]
-    origem = _esc(ci.get('origem', ''))[:35]
-    sac = _esc(ci.get('sac', ''))[:55]
-    nome = _esc(item_nome)[:55]
-    ref = _esc(item_ref)[:20]
-    qtd = _esc(item_qtd)[:20]
+    razao    = _esc(ci.get('razao_social', ''))
+    cnpj     = _esc(ci.get('cnpj',         ''))
+    endereco = _esc(ci.get('endereco',      ''))
+    origem   = _esc(ci.get('origem',        ''))
+    sac      = _esc(ci.get('sac',           ''))
+    nome     = _esc(item_nome)
+    ref      = _esc(item_ref)
+    qtd      = _esc(item_qtd)
 
     if pilha_b64:
-        pilha_inner = f'<img src="data:image/png;base64,{pilha_b64}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">'
+        pilha_inner = (
+            f'<img src="data:image/png;base64,{pilha_b64}" '
+            f'style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">'
+        )
     else:
-        pilha_inner = '<div style="width:100%;height:100%;background:#fd7e14;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;pointer-events:none">⚡</div>'
+        pilha_inner = (
+            '<div style="width:100%;height:100%;background:#fd7e14;border-radius:50%;'
+            'display:flex;align-items:center;justify-content:center;font-size:12px;'
+            'pointer-events:none;color:#fff">⚡</div>'
+        )
 
-    blk_colors = {
-        'ATENÇÃO': ('#fff3cd', '#ffc107'),
-        'INDICAÇÃO': ('#d4edda', '#c3e6cb'),
-        'ADVERTÊNCIA': ('#f8d7da', '#f5c6cb'),
-        'CUIDADOS DE USO': ('#e2e3e5', '#c6c8ca'),
-        'COMPOSIÇÃO': ('#cfe2ff', '#b6d4fe'),
-    }
+    # Bloco ref + marca + código de barras
+    # Na etiqueta PILHA vai na col. esquerda; nos demais tipos vai na col. direita
+    ref_barras = (
+        f'<p style="font-family:Arial,sans-serif;font-size:11px;font-weight:bold;'
+        f'text-align:center;margin:5px 0 1px">{ref} - {nome}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;'
+        f'text-align:center;margin:0 0 3px">MARCA: (marca)</p>'
+        f'<div style="background:#ccc;width:{BAR_W}px;height:{BAR_H}px;max-width:100%;margin:0 auto;'
+        f'display:flex;align-items:center;justify-content:center;font-size:8px;color:#555;'
+        f'letter-spacing:3px;border:1px solid #999">||| CÓDIGO DE BARRAS |||</div>'
+    )
 
-    right_html = ''
+    # ---- Coluna esquerda ----
+    esq = (
+        f'<div style="background:#d9d9d9;width:{SEAL_W}px;height:{SEAL_H}px;max-width:100%;'
+        f'display:flex;align-items:center;justify-content:center;font-size:9px;color:#444;'
+        f'border:1px solid #bbb;margin-bottom:3px">SELO INMETRO</div>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'<b>Importador:</b> {razao}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'{endereco}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'CNPJ: {cnpj} / Origem: {origem}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px;'
+        f'border-top:1px solid #888;padding-top:2px">Quantidade: {qtd}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px;'
+        f'border-top:1px solid #888;padding-top:2px">Data de Fabricação: [data] / Lote: [lote]</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'Data de validade: Indeterminado</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0">'
+        f'SAC: {sac}</p>'
+    )
+    if tipo_etiqueta == 'pilha':
+        esq += ref_barras
+
+    # ---- Coluna direita: blocos de texto ----
+    dir_html = ''
     adv_set = False
+
+    if tem_chorao:
+        dir_html += (
+            '<div style="float:left;width:26px;height:28px;background:#444;border-radius:50%;'
+            'display:flex;align-items:center;justify-content:center;font-size:6px;color:#fff;'
+            'text-align:center;line-height:1.15;margin:0 3px 2px 0">-3<br>anos</div>'
+        )
+
     if textos_dir:
-        for cat, content in textos_dir:
-            bg, bd = blk_colors.get(cat.upper(), ('#e2e3e5', '#c6c8ca'))
-            cont_esc = _esc(content)
-            if len(cont_esc) > 220:
-                cont_esc = cont_esc[:220] + '…'
+        for idx, (cat, content) in enumerate(textos_dir):
+            cont = _esc(content)
             is_adv = (cat.upper() == 'ADVERTÊNCIA')
             adv_id = ' id="adv-block"' if is_adv else ''
             if is_adv:
                 adv_set = True
-            right_html += (
-                f'<div{adv_id} style="background:{bg};border:1px solid {bd};border-radius:3px;'
-                f'padding:3px 5px;margin-bottom:3px;font-size:7px;line-height:1.35">'
-                f'<b style="font-size:7.5px;display:block;margin-bottom:1px">{_esc(cat)}</b>'
-                f'{cont_esc}</div>\n'
+            bord = 'border-top:1px solid #888;padding-top:2px;margin-top:1px;' if idx > 0 else ''
+            dir_html += (
+                f'<p{adv_id} style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+                f'margin:0 0 2px;{bord}">'
+                f'<b style="font-size:11px">{_esc(cat)}:</b> {cont}</p>\n'
             )
     else:
-        right_html = (
-            '<div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;'
-            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">INDICAÇÃO</div>\n'
-            '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;'
-            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">ATENÇÃO</div>\n'
-            '<div id="adv-block" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;'
-            'padding:3px 5px;font-size:8px;min-height:36px">ADVERTÊNCIA</div>\n'
+        dir_html += (
+            '<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0 0 2px;min-height:28px">'
+            '<b style="font-size:11px">ATENÇÃO:</b> (texto não selecionado)</p>\n'
+            '<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0 0 2px;min-height:28px;border-top:1px solid #888;padding-top:2px">'
+            '<b style="font-size:11px">INDICAÇÃO:</b> (texto não selecionado)</p>\n'
+            '<p id="adv-block" style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0;min-height:28px;border-top:1px solid #888;padding-top:2px">'
+            '<b style="font-size:11px">ADVERTÊNCIA:</b> (texto não selecionado)</p>\n'
         )
         adv_set = True
 
     if not adv_set:
-        right_html += '<div id="adv-block" style="height:0;overflow:hidden"></div>\n'
+        dir_html += '<p id="adv-block" style="height:0;margin:0"></p>\n'
 
-    if tem_chorao:
-        right_html += (
-            '<div style="margin-top:3px;text-align:center;font-size:7px;color:#666;'
-            'padding:2px;background:#f0f0ff;border:1px dashed #9999cc;border-radius:3px">✂ chorão</div>\n'
-        )
+    if tipo_etiqueta != 'pilha':
+        dir_html += ref_barras
 
-    left_nome_ref = (
-        f'<div style="font-size:7.5px;font-weight:bold;line-height:1.3;margin-bottom:2px">{nome}</div>\n'
-        f'<div style="font-size:7px;color:#555;margin-bottom:3px">Ref: {ref}'
-        f'{(" | Qtd: " + qtd) if qtd else ""}</div>\n'
-    )
-    left_cli_parts = []
-    if razao:
-        left_cli_parts.append(f'<span>{razao}</span>')
-    if cnpj:
-        left_cli_parts.append(f'CNPJ: {cnpj}')
-    if endereco:
-        left_cli_parts.append(endereco)
-    if origem:
-        left_cli_parts.append(f'Origem: {origem}')
-    if sac:
-        left_cli_parts.append(f'SAC: {sac}')
-    left_cli = '<br>'.join(left_cli_parts)
+    footer = '&ldquo;GUARDAR A EMBALAGEM POR CONTER INFORMAÇÕES IMPORTANTES&rdquo;'
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:Arial,sans-serif;background:transparent;padding:2px}}
-#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;min-height:198px;position:relative;overflow:hidden;user-select:none;align-items:stretch}}
-#le{{width:{COL_E}px;min-width:{COL_E}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px 6px 26px 6px;position:relative}}
-#rd{{width:{COL_D}px;padding:6px;position:relative}}
-#pg{{position:absolute;left:{px_h}px;top:{px_v}px;width:{px_w}px;height:{px_hh}px;cursor:move;border:2px dashed #e8710a;z-index:20}}
-#rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#e8710a;cursor:se-resize;border-radius:0 0 3px 0}}
-#bc{{position:absolute;bottom:5px;left:5px;right:5px;background:#ddd;height:16px;border-radius:2px;font-size:6px;text-align:center;line-height:16px;letter-spacing:2px}}
+body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}}
+#lbl{{border-collapse:collapse;table-layout:fixed;width:{COL*2+2}px}}
+#lbl td{{border:1px solid #000;padding:3px 4px;vertical-align:top;position:relative;overflow:hidden;width:{COL}px}}
+#foot{{text-align:center;font-family:Arial,sans-serif;font-size:11px;font-weight:bold;padding:3px 4px}}
+#pg{{position:absolute;left:{px_h}px;top:{px_v_init}px;width:{px_w}px;height:{px_hh}px;cursor:move;border:2px dashed #e8710a;z-index:20}}
+#rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#e8710a;cursor:se-resize}}
 #cd{{font-size:11px;color:#b85800;font-family:monospace;margin-top:5px;padding:4px 8px;background:#fff8f0;border-radius:3px;border:1px solid #f5d0a9;display:inline-block}}
 </style></head><body>
-<div id="lc">
-  <div id="le">
-    <div style="background:#bbb;border-radius:2px;padding:2px 4px;font-size:7px;text-align:center;margin-bottom:3px;font-weight:bold">INMETRO</div>
-    {left_nome_ref}<div style="font-size:6.5px;color:#555;line-height:1.4">{left_cli}</div>
-    <div id="bc">||| BARCODE |||</div>
-  </div>
-  <div id="rd">
-    {right_html}
+<table id="lbl">
+<tr>
+  <td id="cl">{esq}</td>
+  <td id="cr">
+    {dir_html}
     <div id="pg">{pilha_inner}<div id="rh"></div></div>
-  </div>
-</div>
+  </td>
+</tr>
+<tr><td colspan="2" id="foot">{footer}</td></tr>
+</table>
 <div id="cd">⚡ H=<b id="ch">{pilha_h_cm:.2f}</b>cm &nbsp; V=<b id="cv">{pilha_v_cm:.2f}</b>cm (do topo ADVERTÊNCIA) &nbsp; Largura=<b id="cw">{pilha_w_cm:.2f}</b>cm &nbsp; Altura=<b id="chh">{pilha_hh_cm:.2f}</b>cm
   &nbsp;&nbsp;<span style="color:#888;font-size:10px">⟲ arraste · alça laranja=redimensionar</span></div>
 <script>
 (function(){{
-const S={S},CD={COL_D};
+const S={S},CW={COL};
 const el=document.getElementById('pg'),rh=document.getElementById('rh');
-const rd=document.getElementById('rd');
+const cr=document.getElementById('cr');
 const ch=document.getElementById('ch'),cv=document.getElementById('cv');
 const cw=document.getElementById('cw'),chh=document.getElementById('chh');
 let ADV={ADV_FALLBACK};
@@ -5102,15 +5128,15 @@ rh.addEventListener('mousedown',function(e){{
 }});
 document.addEventListener('mousemove',function(e){{
   if(dr){{
-    const rdH=rd.offsetHeight;
-    let nl=Math.max(0,Math.min(CD-el.offsetWidth-2,sl+(e.clientX-sx)));
-    let nt=Math.max(ADV-S*2,Math.min(rdH-el.offsetHeight-2,st2+(e.clientY-sy)));
+    const crH=cr.offsetHeight;
+    let nl=Math.max(0,Math.min(CW-el.offsetWidth-2,sl+(e.clientX-sx)));
+    let nt=Math.max(ADV-S,Math.min(crH-el.offsetHeight-2,st2+(e.clientY-sy)));
     el.style.left=nl+'px';el.style.top=nt+'px';upd();
   }}else if(rs){{
-    const rdH=rd.offsetHeight;
+    const crH=cr.offsetHeight;
     let nl=parseInt(el.style.left)||0,nt=parseInt(el.style.top)||0;
-    let nw=Math.max(11,Math.min(CD-nl,sw+(e.clientX-sx)));
-    let nh=Math.max(11,Math.min(rdH-nt,sh+(e.clientY-sy)));
+    let nw=Math.max(11,Math.min(CW-nl,sw+(e.clientX-sx)));
+    let nh=Math.max(11,Math.min(crH-nt,sh+(e.clientY-sy)));
     el.style.width=nw+'px';el.style.height=nh+'px';upd();
   }}
 }});
@@ -5123,147 +5149,179 @@ upd();
 def _html_drag_logo_canvas(
     logo_b64, logo_h_cm=0.5, logo_v_cm=5.0, logo_w_cm=2.0, logo_hh_cm=1.0,
     tem_pilha=False, pilha_h_cm=1.767, pilha_v_cm=0.172,
+    pilha_b64=None,
     cliente_info=None, item_nome='', item_ref='', item_qtd='',
-    textos_dir=None, tem_chorao=False
+    textos_dir=None, tem_chorao=False, tipo_etiqueta='padrao',
 ):
-    """Canvas HTML com logo arrastável e redimensionável por mouse. 1cm=22px.
-    Renderiza conteúdo real do cliente/produto no preview."""
-    S = 22
-    COL_E = int(8 * S)
-    COL_D = int(10 * S)
-    px_h = int(logo_h_cm * S)
-    px_v = int(logo_v_cm * S)
-    px_w = max(22, int(logo_w_cm * S))
-    px_hh = max(11, int(logo_hh_cm * S))
-    px_ph = int(pilha_h_cm * S)
-    px_pv = int(pilha_v_cm * S)
+    """Canvas HTML fiel ao layout real da etiqueta Word.
+    Tabela 2 cols × 5.74cm cada + rodapé mesclado (Table Grid, Arial 7pt/8.5pt).
+    Logo: flutuante na col. esquerda — H da esq. da col., V do topo da col.
+    Pilha (estático): indicador na col. direita na posição real (H da esq. col., V do topo ADVERTÊNCIA)."""
+    S = 36               # px/cm  (≈ 91 dpi — fiel às proporções do Word)
+    COL = int(5.74 * S)  # 206 px por coluna
+    SEAL_W = min(int(5.54 * S), COL - 8)  # 199 px
+    SEAL_H = int(2.5  * S)   # 90 px
+    BAR_W  = min(int(5.34 * S), COL - 8)  # 192 px
+    BAR_H  = int(2.24 * S)   # 80 px
+
+    px_h   = int(logo_h_cm  * S)
+    px_v   = int(logo_v_cm  * S)
+    px_w   = max(11, int(logo_w_cm  * S))
+    px_hh  = max(11, int(logo_hh_cm * S))
+    # Pilha indicator (static): position in right col, V relative to ADVERTÊNCIA
+    ADV_FALLBACK = SEAL_H + 120
+    px_ph_init = int(pilha_h_cm * S)
+    px_pv_init = ADV_FALLBACK + int(pilha_v_cm * S)
+    PILHA_IND_W = 36   # ~1cm placeholder width for indicator
+    PILHA_IND_H = 34   # ~0.95cm placeholder height
 
     def _esc(s):
-        return str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('**', '')
+        return str(s).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('**','')
 
     ci = cliente_info or {}
-    razao = _esc(ci.get('razao_social', ''))[:55]
-    cnpj = _esc(ci.get('cnpj', ''))[:25]
-    endereco = _esc(ci.get('endereco', ''))[:70]
-    origem = _esc(ci.get('origem', ''))[:35]
-    sac = _esc(ci.get('sac', ''))[:55]
-    nome = _esc(item_nome)[:55]
-    ref = _esc(item_ref)[:20]
-    qtd = _esc(item_qtd)[:20]
+    razao    = _esc(ci.get('razao_social', ''))
+    cnpj     = _esc(ci.get('cnpj',         ''))
+    endereco = _esc(ci.get('endereco',      ''))
+    origem   = _esc(ci.get('origem',        ''))
+    sac      = _esc(ci.get('sac',           ''))
+    nome     = _esc(item_nome)
+    ref      = _esc(item_ref)
+    qtd      = _esc(item_qtd)
 
-    blk_colors = {
-        'ATENÇÃO': ('#fff3cd', '#ffc107'),
-        'INDICAÇÃO': ('#d4edda', '#c3e6cb'),
-        'ADVERTÊNCIA': ('#f8d7da', '#f5c6cb'),
-        'CUIDADOS DE USO': ('#e2e3e5', '#c6c8ca'),
-        'COMPOSIÇÃO': ('#cfe2ff', '#b6d4fe'),
-    }
+    # Bloco ref + barcode (pilha: col. esq; demais: col. dir.)
+    ref_barras = (
+        f'<p style="font-family:Arial,sans-serif;font-size:11px;font-weight:bold;'
+        f'text-align:center;margin:5px 0 1px">{ref} - {nome}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;'
+        f'text-align:center;margin:0 0 3px">MARCA: (marca)</p>'
+        f'<div style="background:#ccc;width:{BAR_W}px;height:{BAR_H}px;max-width:100%;margin:0 auto;'
+        f'display:flex;align-items:center;justify-content:center;font-size:8px;color:#555;'
+        f'letter-spacing:3px;border:1px solid #999">||| CÓDIGO DE BARRAS |||</div>'
+    )
 
-    right_html = ''
+    # ---- Coluna esquerda ----
+    esq = (
+        f'<div style="background:#d9d9d9;width:{SEAL_W}px;height:{SEAL_H}px;max-width:100%;'
+        f'display:flex;align-items:center;justify-content:center;font-size:9px;color:#444;'
+        f'border:1px solid #bbb;margin-bottom:3px">SELO INMETRO</div>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'<b>Importador:</b> {razao}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'{endereco}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'CNPJ: {cnpj} / Origem: {origem}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px;'
+        f'border-top:1px solid #888;padding-top:2px">Quantidade: {qtd}</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px;'
+        f'border-top:1px solid #888;padding-top:2px">Data de Fabricação: [data] / Lote: [lote]</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0 0 1px">'
+        f'Data de validade: Indeterminado</p>'
+        f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0">'
+        f'SAC: {sac}</p>'
+    )
+    if tipo_etiqueta == 'pilha':
+        esq += ref_barras
+
+    # ---- Coluna direita: blocos de texto ----
+    dir_html = ''
     adv_set = False
+
+    if tem_chorao:
+        dir_html += (
+            '<div style="float:left;width:26px;height:28px;background:#444;border-radius:50%;'
+            'display:flex;align-items:center;justify-content:center;font-size:6px;color:#fff;'
+            'text-align:center;line-height:1.15;margin:0 3px 2px 0">-3<br>anos</div>'
+        )
+
     if textos_dir:
-        for cat, content in textos_dir:
-            bg, bd = blk_colors.get(cat.upper(), ('#e2e3e5', '#c6c8ca'))
-            cont_esc = _esc(content)
-            if len(cont_esc) > 220:
-                cont_esc = cont_esc[:220] + '…'
+        for idx2, (cat, content) in enumerate(textos_dir):
+            cont = _esc(content)
             is_adv = (cat.upper() == 'ADVERTÊNCIA')
             adv_id = ' id="adv-block"' if is_adv else ''
             if is_adv:
                 adv_set = True
-            pilha_indicator = ''
-            if is_adv and tem_pilha:
-                pilha_indicator = (
-                    f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
-                    f'width:20px;height:18px;background:#fd7e14;border-radius:50%;'
-                    f'display:flex;align-items:center;justify-content:center;font-size:10px;z-index:5;opacity:0.85;">⚡</div>'
-                )
-            right_html += (
-                f'<div{adv_id} style="background:{bg};border:1px solid {bd};border-radius:3px;'
-                f'padding:3px 5px;margin-bottom:3px;font-size:7px;line-height:1.35;position:relative">'
-                f'<b style="font-size:7.5px;display:block;margin-bottom:1px">{_esc(cat)}</b>'
-                f'{cont_esc}{pilha_indicator}</div>\n'
+            bord = 'border-top:1px solid #888;padding-top:2px;margin-top:1px;' if idx2 > 0 else ''
+            dir_html += (
+                f'<p{adv_id} style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+                f'margin:0 0 2px;{bord}">'
+                f'<b style="font-size:11px">{_esc(cat)}:</b> {cont}</p>\n'
             )
     else:
-        pilha_inner_html = (
-            f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
-            f'width:20px;height:18px;background:#fd7e14;border-radius:50%;'
-            f'display:flex;align-items:center;justify-content:center;font-size:10px;z-index:5;">⚡</div>'
-        ) if tem_pilha else ''
-        right_html = (
-            '<div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;'
-            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">INDICAÇÃO</div>\n'
-            '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;'
-            'padding:3px 5px;margin-bottom:3px;font-size:8px;min-height:36px">ATENÇÃO</div>\n'
-            f'<div id="adv-block" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;'
-            f'padding:3px 5px;font-size:8px;min-height:36px;position:relative">ADVERTÊNCIA{pilha_inner_html}</div>\n'
+        dir_html += (
+            '<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0 0 2px;min-height:28px">'
+            '<b style="font-size:11px">ATENÇÃO:</b> (texto não selecionado)</p>\n'
+            '<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0 0 2px;min-height:28px;border-top:1px solid #888;padding-top:2px">'
+            '<b style="font-size:11px">INDICAÇÃO:</b> (texto não selecionado)</p>\n'
+            '<p id="adv-block" style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;'
+            'margin:0;min-height:28px;border-top:1px solid #888;padding-top:2px">'
+            '<b style="font-size:11px">ADVERTÊNCIA:</b> (texto não selecionado)</p>\n'
         )
         adv_set = True
 
     if not adv_set:
-        pilha_fb = (
-            f'<div style="position:absolute;left:{px_ph}px;top:{px_pv}px;'
-            f'width:20px;height:18px;background:#fd7e14;border-radius:50%;'
-            f'display:flex;align-items:center;justify-content:center;font-size:10px;">⚡</div>'
-        ) if tem_pilha else ''
-        right_html += f'<div id="adv-block" style="height:0;overflow:hidden;position:relative">{pilha_fb}</div>\n'
+        dir_html += '<p id="adv-block" style="height:0;margin:0"></p>\n'
 
-    if tem_chorao:
-        right_html += (
-            '<div style="margin-top:3px;text-align:center;font-size:7px;color:#666;'
-            'padding:2px;background:#f0f0ff;border:1px dashed #9999cc;border-radius:3px">✂ chorão</div>\n'
+    if tipo_etiqueta != 'pilha':
+        dir_html += ref_barras
+
+    # Pilha indicador estático na col. direita (não draggable aqui)
+    if tem_pilha:
+        if pilha_b64:
+            pilha_ind_inner = (
+                f'<img src="data:image/png;base64,{pilha_b64}" '
+                f'style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none">'
+            )
+        else:
+            pilha_ind_inner = (
+                '<div style="width:100%;height:100%;background:#fd7e14;border-radius:50%;'
+                'display:flex;align-items:center;justify-content:center;font-size:12px;'
+                'color:#fff;pointer-events:none">⚡</div>'
+            )
+        dir_html += (
+            f'<div id="pilha-ind" style="position:absolute;left:{px_ph_init}px;top:{px_pv_init}px;'
+            f'width:{PILHA_IND_W}px;height:{PILHA_IND_H}px;border:2px dashed #e8710a;'
+            f'opacity:0.7;z-index:10">{pilha_ind_inner}</div>'
         )
 
-    left_nome_ref = (
-        f'<div style="font-size:7.5px;font-weight:bold;line-height:1.3;margin-bottom:2px">{nome}</div>\n'
-        f'<div style="font-size:7px;color:#555;margin-bottom:3px">Ref: {ref}'
-        f'{(" | Qtd: " + qtd) if qtd else ""}</div>\n'
-    )
-    left_cli_parts = []
-    if razao:
-        left_cli_parts.append(f'<span>{razao}</span>')
-    if cnpj:
-        left_cli_parts.append(f'CNPJ: {cnpj}')
-    if endereco:
-        left_cli_parts.append(endereco)
-    if origem:
-        left_cli_parts.append(f'Origem: {origem}')
-    if sac:
-        left_cli_parts.append(f'SAC: {sac}')
-    left_cli = '<br>'.join(left_cli_parts)
+    footer = '&ldquo;GUARDAR A EMBALAGEM POR CONTER INFORMAÇÕES IMPORTANTES&rdquo;'
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:Arial,sans-serif;background:transparent;padding:2px}}
-#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;min-height:198px;position:relative;overflow:hidden;user-select:none;align-items:stretch}}
-#le{{width:{COL_E}px;min-width:{COL_E}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px 6px 26px 6px;position:relative}}
-#rd{{width:{COL_D}px;padding:6px;position:relative}}
+body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}}
+#lbl{{border-collapse:collapse;table-layout:fixed;width:{COL*2+2}px}}
+#lbl td{{border:1px solid #000;padding:3px 4px;vertical-align:top;position:relative;overflow:hidden;width:{COL}px}}
+#foot{{text-align:center;font-family:Arial,sans-serif;font-size:11px;font-weight:bold;padding:3px 4px}}
 #lg{{position:absolute;left:{px_h}px;top:{px_v}px;width:{px_w}px;height:{px_hh}px;cursor:move;border:2px dashed #007bff;z-index:20}}
 #lg img{{width:100%;height:100%;object-fit:contain;pointer-events:none;display:block}}
-#rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#007bff;cursor:se-resize;border-radius:0 0 3px 0}}
-#bc{{position:absolute;bottom:5px;left:5px;right:5px;background:#ddd;height:16px;border-radius:2px;font-size:6px;text-align:center;line-height:16px;letter-spacing:2px}}
+#rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#007bff;cursor:se-resize}}
 #cd{{font-size:11px;color:#1a6bcc;font-family:monospace;margin-top:5px;padding:4px 8px;background:#f0f7ff;border-radius:3px;border:1px solid #c8dcf5;display:inline-block}}
 </style></head><body>
-<div id="lc">
-  <div id="le">
-    <div style="background:#bbb;border-radius:2px;padding:2px 4px;font-size:7px;text-align:center;margin-bottom:3px;font-weight:bold">INMETRO</div>
-    {left_nome_ref}<div style="font-size:6.5px;color:#555;line-height:1.4">{left_cli}</div>
-    <div id="bc">||| BARCODE |||</div>
+<table id="lbl">
+<tr>
+  <td id="cl">
+    {esq}
     <div id="lg"><img src="data:image/png;base64,{logo_b64}"><div id="rh"></div></div>
-  </div>
-  <div id="rd">
-    {right_html}
-  </div>
-</div>
+  </td>
+  <td id="cr">
+    {dir_html}
+  </td>
+</tr>
+<tr><td colspan="2" id="foot">{footer}</td></tr>
+</table>
 <div id="cd">🏷 H=<b id="ch">{logo_h_cm:.2f}</b>cm &nbsp; V=<b id="cv">{logo_v_cm:.2f}</b>cm &nbsp; Largura=<b id="cw">{logo_w_cm:.2f}</b>cm &nbsp; Altura=<b id="chh">{logo_hh_cm:.2f}</b>cm
   &nbsp;&nbsp;<span style="color:#888;font-size:10px">⟲ arraste · alça azul=redimensionar</span></div>
 <script>
 (function(){{
-const S={S},CE={COL_E};
+const S={S},CW={COL};
 const el=document.getElementById('lg'),rh=document.getElementById('rh');
+const cl=document.getElementById('cl');
 const ch=document.getElementById('ch'),cv=document.getElementById('cv');
 const cw=document.getElementById('cw'),chh=document.getElementById('chh');
+const pi=document.getElementById('pilha-ind');
+let ADV={ADV_FALLBACK};
 let dr=false,rs=false,sx,sy,sl,st2,sw,sh;
 function fmt(n){{return(Math.round(n*20)/20).toFixed(2)}}
 function upd(){{
@@ -5271,6 +5329,11 @@ function upd(){{
   ch.textContent=fmt(l/S);cv.textContent=fmt(t/S);
   cw.textContent=fmt(el.offsetWidth/S);chh.textContent=fmt(el.offsetHeight/S);
 }}
+window.addEventListener('load',function(){{
+  const advEl=document.getElementById('adv-block');
+  if(advEl&&pi){{ADV=advEl.offsetTop;pi.style.top=(ADV+Math.round({pilha_v_cm}*S))+'px';}}
+  upd();
+}});
 el.addEventListener('mousedown',function(e){{
   if(e.target===rh)return;
   dr=true;sx=e.clientX;sy=e.clientY;
@@ -5283,15 +5346,15 @@ rh.addEventListener('mousedown',function(e){{
 }});
 document.addEventListener('mousemove',function(e){{
   if(dr){{
-    const leH=document.getElementById('le').offsetHeight;
-    let nl=Math.max(0,Math.min(CE-el.offsetWidth-2,sl+(e.clientX-sx)));
-    let nt=Math.max(0,Math.min(leH-el.offsetHeight-2,st2+(e.clientY-sy)));
+    const clH=cl.offsetHeight;
+    let nl=Math.max(0,Math.min(CW-el.offsetWidth-2,sl+(e.clientX-sx)));
+    let nt=Math.max(0,Math.min(clH-el.offsetHeight-2,st2+(e.clientY-sy)));
     el.style.left=nl+'px';el.style.top=nt+'px';upd();
   }}else if(rs){{
-    const leH=document.getElementById('le').offsetHeight;
+    const clH=cl.offsetHeight;
     let nl=parseInt(el.style.left)||0,nt=parseInt(el.style.top)||0;
-    let nw=Math.max(22,Math.min(CE-nl,sw+(e.clientX-sx)));
-    let nh=Math.max(11,Math.min(leH-nt,sh+(e.clientY-sy)));
+    let nw=Math.max(11,Math.min(CW-nl,sw+(e.clientX-sx)));
+    let nh=Math.max(11,Math.min(clH-nt,sh+(e.clientY-sy)));
     el.style.width=nw+'px';el.style.height=nh+'px';upd();
   }}
 }});
@@ -13403,8 +13466,9 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         item_qtd=str(_item.get('qtd', '')),
                                         textos_dir=_textos_dir_prev,
                                         tem_chorao=_tem_chorao_prev,
+                                        tipo_etiqueta=_tipo,
                                     )
-                                    _stc_prev.html(_pilha_drag, height=430)
+                                    _stc_prev.html(_pilha_drag, height=520)
                                 else:
                                     _pp_h, _pp_v, _pp_w, _pp_hh = 1.767, 0.172, 1.0, 0.95
 
@@ -13428,14 +13492,16 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                             logo_w_cm=_lw, logo_hh_cm=_lhh,
                                             tem_pilha=_tem_pilha_det,
                                             pilha_h_cm=_pp_h, pilha_v_cm=_pp_v,
+                                            pilha_b64=_pilha_b64_prev,
                                             cliente_info=_cli_prev_data,
                                             item_nome=_nome_curto,
                                             item_ref=_ref_curta,
                                             item_qtd=str(_item.get('qtd', '')),
                                             textos_dir=_textos_dir_prev,
                                             tem_chorao=_tem_chorao_prev,
+                                            tipo_etiqueta=_tipo,
                                         )
-                                        _stc_prev.html(_drag_html, height=430)
+                                        _stc_prev.html(_drag_html, height=520)
 
                     with st.container(border=True):
                         st.markdown("##### 5️⃣ Gerar")
