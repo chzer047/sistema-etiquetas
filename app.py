@@ -4439,6 +4439,7 @@ def selo_docx_para_png(selo_docx_bytes, soffice_path, coletar_erro=None):
 
 def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, pilha_png=None, variante_selo=None,
                             pilha_pos_h_cm=1.767, pilha_pos_v_cm=0.172,
+                            pilha_largura_cm=1.0, pilha_altura_cm=0.95,
                             logo_png=None, logo_pos_h_cm=0.5, logo_pos_v_cm=1.0,
                             logo_largura_cm=2.0, logo_altura_cm=1.0):
     """Monta uma etiqueta (tabela 2 colunas) dentro do documento `doc`.
@@ -4740,7 +4741,7 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         _bloco_up_check = bloco.upper().lstrip().lstrip('*').lstrip()
         if pilha_png and dados.get('tipo') == 'pilha' and _bloco_up_check.startswith('ADVERTÊNCIA:'):
             _run_pilha = pb.add_run()
-            _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(1.0), height=_Cm(0.95))
+            _run_pilha.add_picture(_Bio(pilha_png), width=_Cm(pilha_largura_cm), height=_Cm(pilha_altura_cm))
             _tornar_imagem_flutuante_canto_superior_direito(
                 _run_pilha, doc_pr_id=200,
                 pos_h_cm=pilha_pos_h_cm, pos_v_cm=pilha_pos_v_cm
@@ -4941,6 +4942,95 @@ def _html_preview_label(
 </div>
 """
     return html
+
+
+def _html_drag_pilha_canvas(
+    pilha_h_cm=1.767, pilha_v_cm=0.172, pilha_w_cm=1.0, pilha_hh_cm=0.95,
+    pilha_b64=None
+):
+    """Canvas HTML com imagem de pilha arrastável na coluna direita.
+    H = da esquerda da coluna direita; V = do topo do bloco ADVERTÊNCIA. 1cm=22px."""
+    S = 22
+    COL_E = int(8 * S)
+    COL_D = int(10 * S)
+    ALT = int(9 * S)
+    # ADVERTÊNCIA começa em: padding(6) + INDICAÇÃO(42) + gap(3) + ATENÇÃO(42) + gap(3) = 96px
+    ADV_TOP = 96
+    px_h = int(pilha_h_cm * S)
+    px_v = ADV_TOP + int(pilha_v_cm * S)
+    px_w = max(11, int(pilha_w_cm * S))
+    px_hh = max(11, int(pilha_hh_cm * S))
+    if pilha_b64:
+        pilha_inner = f'<img src="data:image/png;base64,{pilha_b64}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;display:block">'
+    else:
+        pilha_inner = '<div style="width:100%;height:100%;background:#fd7e14;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;pointer-events:none">⚡</div>'
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:Arial,sans-serif;background:transparent;padding:2px}}
+#lc{{display:flex;border:2px solid #333;border-radius:4px;width:{COL_E+COL_D}px;height:{ALT}px;position:relative;overflow:hidden;user-select:none}}
+#le{{width:{COL_E}px;min-width:{COL_E}px;height:{ALT}px;background:#f5f5f5;border-right:1px solid #aaa;padding:6px;position:relative;overflow:hidden}}
+#rd{{width:{COL_D}px;height:{ALT}px;padding:6px;position:relative;overflow:hidden}}
+#pg{{position:absolute;left:{px_h}px;top:{px_v}px;width:{px_w}px;height:{px_hh}px;cursor:move;border:2px dashed #e8710a;z-index:20}}
+#rh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#e8710a;cursor:se-resize;border-radius:0 0 3px 0}}
+#adv{{border:2px dashed #e8710a !important}}
+#cd{{font-size:11px;color:#b85800;font-family:monospace;margin-top:5px;padding:4px 8px;background:#fff8f0;border-radius:3px;border:1px solid #f5d0a9;display:inline-block}}
+</style></head><body>
+<div id="lc">
+  <div id="le">
+    <div style="background:#ccc;border-radius:2px;padding:2px 4px;font-size:8px;text-align:center;margin-bottom:4px">SELO INMETRO</div>
+    <div style="font-size:7px;color:#555;line-height:1.4">Importador: ...<br>Endereço: ...<br>CNPJ: ...<br>Origem: ...</div>
+    <div style="position:absolute;bottom:8px;left:6px;right:6px;background:#ddd;height:18px;border-radius:2px;font-size:7px;text-align:center;line-height:18px">||| CÓDIGO DE BARRAS |||</div>
+  </div>
+  <div id="rd">
+    <div style="background:#d4edda;border:1px solid #c3e6cb;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">INDICAÇÃO</div>
+    <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:3px;padding:3px 5px;margin-bottom:3px;font-size:9px;height:42px">ATENÇÃO</div>
+    <div id="adv" style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:3px;padding:3px 5px;font-size:9px;height:42px">ADVERTÊNCIA ← V=0</div>
+    <div id="pg">{pilha_inner}<div id="rh"></div></div>
+  </div>
+</div>
+<div id="cd">⚡ H=<b id="ch">{pilha_h_cm:.2f}</b>cm &nbsp; V=<b id="cv">{pilha_v_cm:.2f}</b>cm (do topo ADVERTÊNCIA) &nbsp; Largura=<b id="cw">{pilha_w_cm:.2f}</b>cm &nbsp; Altura=<b id="chh">{pilha_hh_cm:.2f}</b>cm
+  &nbsp;&nbsp;<span style="color:#888;font-size:10px">⟲ arraste · alça laranja=redimensionar</span></div>
+<script>
+(function(){{
+const S={S},CD={COL_D},AL={ALT},ADV={ADV_TOP};
+const el=document.getElementById('pg'),rh=document.getElementById('rh');
+const ch=document.getElementById('ch'),cv=document.getElementById('cv');
+const cw=document.getElementById('cw'),chh=document.getElementById('chh');
+let dr=false,rs=false,sx,sy,sl,st2,sw,sh;
+function fmt(n){{return(Math.round(n*20)/20).toFixed(2)}}
+function upd(){{
+  const l=parseInt(el.style.left)||0,t=parseInt(el.style.top)||0;
+  ch.textContent=fmt(l/S);
+  cv.textContent=fmt((t-ADV)/S);
+  cw.textContent=fmt(el.offsetWidth/S);chh.textContent=fmt(el.offsetHeight/S);
+}}
+el.addEventListener('mousedown',function(e){{
+  if(e.target===rh)return;
+  dr=true;sx=e.clientX;sy=e.clientY;
+  sl=parseInt(el.style.left)||0;st2=parseInt(el.style.top)||0;
+  e.preventDefault();
+}});
+rh.addEventListener('mousedown',function(e){{
+  rs=true;sx=e.clientX;sy=e.clientY;sw=el.offsetWidth;sh=el.offsetHeight;
+  e.preventDefault();e.stopPropagation();
+}});
+document.addEventListener('mousemove',function(e){{
+  if(dr){{
+    let nl=Math.max(0,Math.min(CD-el.offsetWidth-2,sl+(e.clientX-sx)));
+    let nt=Math.max(ADV-S*2,Math.min(AL-el.offsetHeight-2,st2+(e.clientY-sy)));
+    el.style.left=nl+'px';el.style.top=nt+'px';upd();
+  }}else if(rs){{
+    let nl=parseInt(el.style.left)||0,nt=parseInt(el.style.top)||0;
+    let nw=Math.max(11,Math.min(CD-nl,sw+(e.clientX-sx)));
+    let nh=Math.max(11,Math.min(AL-nt,sh+(e.clientY-sy)));
+    el.style.width=nw+'px';el.style.height=nh+'px';upd();
+  }}
+}});
+document.addEventListener('mouseup',function(){{dr=false;rs=false;}});
+upd();
+}})();
+</script></body></html>"""
 
 
 def _html_drag_logo_canvas(
@@ -5166,6 +5256,8 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
             variante_selo=cfg['variante'],
             pilha_pos_h_cm=cfg.get('pilha_pos_h', 1.767),
             pilha_pos_v_cm=cfg.get('pilha_pos_v', 0.172),
+            pilha_largura_cm=cfg.get('pilha_largura_cm', 1.0),
+            pilha_altura_cm=cfg.get('pilha_altura_cm', 0.95),
             logo_png=cfg.get('logo_png') if cfg.get('logo_ativo', False) else None,
             logo_pos_h_cm=cfg.get('logo_pos_h', 0.5),
             logo_pos_v_cm=cfg.get('logo_pos_v', 5.0),
@@ -13094,15 +13186,25 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
 
                                 # --- Posição da imagem de pilha (apenas itens pilha) ---
                                 if _tem_pilha_det:
-                                    st.markdown("**📍 Posição da imagem de pilha:**")
-                                    _pp_h = st.slider("Horizontal (cm, coluna direita)", 0.0, 5.0, 1.767, 0.05, key=f"pilha_pos_h_{_i}")
-                                    _pp_v = st.slider("Vertical (cm, do topo do bloco ADVERTÊNCIA)", -1.0, 5.0, 0.172, 0.05, key=f"pilha_pos_v_{_i}")
-                                    _prev = _html_preview_label(
-                                        tem_pilha=True, pilha_pos_h=_pp_h, pilha_pos_v=_pp_v
+                                    st.markdown("**📍 Posição e tamanho da imagem de pilha:**")
+                                    _pc1, _pc2 = st.columns(2)
+                                    with _pc1:
+                                        _pp_h = st.number_input("H (cm, da esquerda)", 0.0, 10.0, 1.767, 0.05, key=f"pilha_pos_h_{_i}", format="%.2f")
+                                        _pp_v = st.number_input("V (cm, do topo ADVERTÊNCIA)", -2.0, 5.0, 0.172, 0.05, key=f"pilha_pos_v_{_i}", format="%.2f")
+                                    with _pc2:
+                                        _pp_w = st.number_input("Largura (cm)", 0.3, 4.0, 1.0, 0.05, key=f"pilha_w_{_i}", format="%.2f")
+                                        _pp_hh = st.number_input("Altura (cm)", 0.3, 4.0, 0.95, 0.05, key=f"pilha_hh_{_i}", format="%.2f")
+                                    _pilha_bytes_prev2, _ = buscar_asset_generico("pilha")
+                                    _pilha_b64_prev = _b64_prev.b64encode(_pilha_bytes_prev2).decode() if _pilha_bytes_prev2 else None
+                                    st.caption("💡 Arraste a imagem no preview · alça laranja = redimensionar · leia valores e ajuste os campos acima para posição exata.")
+                                    _pilha_drag = _html_drag_pilha_canvas(
+                                        pilha_h_cm=_pp_h, pilha_v_cm=_pp_v,
+                                        pilha_w_cm=_pp_w, pilha_hh_cm=_pp_hh,
+                                        pilha_b64=_pilha_b64_prev
                                     )
-                                    _stc_prev.html(_prev, height=225)
+                                    _stc_prev.html(_pilha_drag, height=255)
                                 else:
-                                    _pp_h, _pp_v = 1.767, 0.172
+                                    _pp_h, _pp_v, _pp_w, _pp_hh = 1.767, 0.172, 1.0, 0.95
 
                                 # --- Logo do cliente ---
                                 if _logo_bytes_cur:
@@ -13153,6 +13255,8 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         'titulos_texto': _titulos_texto,
                                         'pilha_pos_h': st.session_state.get(f"pilha_pos_h_{_i}", 1.767),
                                         'pilha_pos_v': st.session_state.get(f"pilha_pos_v_{_i}", 0.172),
+                                        'pilha_largura_cm': st.session_state.get(f"pilha_w_{_i}", 1.0),
+                                        'pilha_altura_cm': st.session_state.get(f"pilha_hh_{_i}", 0.95),
                                         'logo_ativo': st.session_state.get(f"usar_logo_{_i}", False),
                                         'logo_png': _logo_bytes_gen,
                                         'logo_pos_h': st.session_state.get(f"logo_pos_h_{_i}", 0.5),
