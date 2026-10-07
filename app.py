@@ -19,6 +19,57 @@ from zoneinfo import ZoneInfo
 from openpyxl import load_workbook
 
 # ==========================================
+# ETIQUETA CANVAS BRIDGE COMPONENT
+# Canal bidirecional canvas→Streamlit via declare_component (protocolo oficial).
+# O componente escuta postMessages do canvas e chama setComponentValue,
+# que devolve o valor diretamente ao Python sem manipulação de DOM.
+# ==========================================
+import os as _os_bridge
+import streamlit.components.v1 as _stc_v1_bridge
+
+_ETIQ_BRIDGE_DIR = "/tmp/st_etiq_bridge_v2"
+_os_bridge.makedirs(_ETIQ_BRIDGE_DIR, exist_ok=True)
+_etiq_bridge_html = (
+    "<!DOCTYPE html><html>"
+    "<head><meta charset='utf-8'>"
+    "<style>html,body{margin:0;padding:0;height:0;overflow:hidden}</style>"
+    "</head><body><script>"
+    "(function(){"
+    "var _init=false,_idx=null;"
+    "function _s(t,d){var m=Object.assign({isStreamlitMessage:true,type:t},d||{});window.parent.postMessage(m,'*');}"
+    "function _ready(){_s('streamlit:componentReady',{apiVersion:1});}"
+    "function _val(v){_s('streamlit:setComponentValue',{value:v,dataType:'json'});}"
+    "function _h(h){_s('streamlit:setFrameHeight',{height:h});}"
+    "window.addEventListener('message',function(e){"
+    "if(!e.data||!e.data.isStreamlitMessage)return;"
+    "if(e.data.type==='streamlit:render'){"
+    "_idx=(e.data.args||{}).idx;"
+    "if(!_init){_init=true;"
+    "try{window.parent.addEventListener('message',function(ev){"
+    "if(!ev.data||ev.data.type!=='etiq_pos')return;"
+    "if(ev.data.idx!==_idx)return;"
+    "try{_val(JSON.parse(ev.data.json||'{}'));}catch(pe){}"
+    "});}"
+    "catch(err){console.error('[etiq_bridge]',err);}"
+    "}"
+    "_h(0);"
+    "}"
+    "});"
+    "_h(0);_ready();"
+    "})();"
+    "</script></body></html>"
+)
+_etiq_bridge_path = _ETIQ_BRIDGE_DIR + "/index.html"
+try:
+    _cur_bridge = open(_etiq_bridge_path).read() if _os_bridge.path.exists(_etiq_bridge_path) else ""
+except Exception:
+    _cur_bridge = ""
+if _cur_bridge != _etiq_bridge_html:
+    with open(_etiq_bridge_path, "w") as _f:
+        _f.write(_etiq_bridge_html)
+_etiq_bridge_comp = _stc_v1_bridge.declare_component("etiq_bridge_v2", path=_ETIQ_BRIDGE_DIR)
+
+# ==========================================
 # CONFIG
 # ==========================================
 
@@ -13814,24 +13865,30 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 _idade_uni_cur = st.session_state.get(f"idadeuni_{_i}", 'ANOS')
                                 _tem_chorao_prev = bool(_tipo_chorao_prev == 'chorao18' or _idade_uni_cur == 'ANOS')
 
-                                # Lê bridge do canvas e aplica posições ao session_state ANTES de criar inputs
-                                _bridge_raw = st.session_state.get(f"_bridge_{_i}", "")
-                                if _bridge_raw:
+                                # Bridge via declare_component: canvas→Streamlit sem manipulação de DOM.
+                                # O componente (height=0, invisível) escuta postMessages do canvas e
+                                # devolve o JSON via setComponentValue → Python recebe em _br.
+                                _br = _etiq_bridge_comp(idx=_i, key=f"etiq_bridge_{_i}", default=None)
+                                _lbk = f"_last_bridge_{_i}"
+                                if _br is not None:
                                     try:
                                         import json as _json
-                                        _bpos = _json.loads(_bridge_raw)
-                                        _clamp = lambda v, mn, mx: max(mn, min(mx, float(v)))
-                                        if 'logo_h'   in _bpos: st.session_state[f"logo_pos_h_{_i}"] = _clamp(_bpos['logo_h'],   0.0, 12.0)
-                                        if 'logo_v'   in _bpos: st.session_state[f"logo_pos_v_{_i}"] = _clamp(_bpos['logo_v'],   0.0, 15.0)
-                                        if 'logo_w'   in _bpos: st.session_state[f"logo_w_{_i}"]     = _clamp(_bpos['logo_w'],   0.5, 11.0)
-                                        if 'logo_hh'  in _bpos: st.session_state[f"logo_hh_{_i}"]    = _clamp(_bpos['logo_hh'],  0.3,  8.0)
-                                        if 'pilha_h'  in _bpos: st.session_state[f"pilha_pos_h_{_i}"]= _clamp(_bpos['pilha_h'],  0.0, 10.0)
-                                        if 'pilha_v'  in _bpos: st.session_state[f"pilha_pos_v_{_i}"]= _clamp(_bpos['pilha_v'], -2.0,  5.0)
-                                        if 'pilha_w'  in _bpos: st.session_state[f"pilha_w_{_i}"]    = _clamp(_bpos['pilha_w'],  0.3,  4.0)
-                                        if 'pilha_hh' in _bpos: st.session_state[f"pilha_hh_{_i}"]   = _clamp(_bpos['pilha_hh'], 0.3,  4.0)
+                                        # _br é dict (dataType:'json' parseado pelo Streamlit)
+                                        _bpos = _br if isinstance(_br, dict) else _json.loads(str(_br))
+                                        _br_str = _json.dumps(_bpos, sort_keys=True)
+                                        if _br_str != st.session_state.get(_lbk, ""):
+                                            st.session_state[_lbk] = _br_str
+                                            _clamp = lambda v, mn, mx: max(mn, min(mx, float(v)))
+                                            if 'logo_h'   in _bpos: st.session_state[f"logo_pos_h_{_i}"] = _clamp(_bpos['logo_h'],   0.0, 12.0)
+                                            if 'logo_v'   in _bpos: st.session_state[f"logo_pos_v_{_i}"] = _clamp(_bpos['logo_v'],   0.0, 15.0)
+                                            if 'logo_w'   in _bpos: st.session_state[f"logo_w_{_i}"]     = _clamp(_bpos['logo_w'],   0.5, 11.0)
+                                            if 'logo_hh'  in _bpos: st.session_state[f"logo_hh_{_i}"]    = _clamp(_bpos['logo_hh'],  0.3,  8.0)
+                                            if 'pilha_h'  in _bpos: st.session_state[f"pilha_pos_h_{_i}"]= _clamp(_bpos['pilha_h'],  0.0, 10.0)
+                                            if 'pilha_v'  in _bpos: st.session_state[f"pilha_pos_v_{_i}"]= _clamp(_bpos['pilha_v'], -2.0,  5.0)
+                                            if 'pilha_w'  in _bpos: st.session_state[f"pilha_w_{_i}"]    = _clamp(_bpos['pilha_w'],  0.3,  4.0)
+                                            if 'pilha_hh' in _bpos: st.session_state[f"pilha_hh_{_i}"]   = _clamp(_bpos['pilha_hh'], 0.3,  4.0)
                                     except Exception:
                                         pass
-                                    st.session_state[f"_bridge_{_i}"] = ""
 
                                 # --- Posição da imagem de pilha (apenas itens pilha) ---
                                 _pilha_b64_prev = None
@@ -13872,39 +13929,6 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
 
                                 # --- Canvas unificado: pilha + logo no mesmo preview ---
                                 if _tem_pilha_det or _usar_logo_i:
-                                    # Bridge invisível: JS escreve JSON aqui → Streamlit rerun → Python aplica posições
-                                    st.text_input(f"bridge_{_i}", value="", label_visibility="collapsed", key=f"_bridge_{_i}", placeholder=f"__bridge_{_i}__")
-                                    st.markdown(f"""<style>
-div[data-testid="stTextInput"]:has(input[placeholder="__bridge_{_i}__"]){{display:none!important;height:0!important}}
-</style>""", unsafe_allow_html=True)
-                                    # Listener injetado via iframe (scripts em iframes EXECUTAM, ao contrário de
-                                    # st.markdown que usa dangerouslySetInnerHTML e bloqueia <script>).
-                                    # Acessa window.parent para escutar postMessages do canvas e atualizar o bridge.
-                                    # Usa placeholder como seletor porque aria-label pode não ser definido com label_visibility="collapsed".
-                                    _listener_html = f"""<!DOCTYPE html><html><body><script>
-(function(){{
-  var p=window.parent;
-  if(p._etiq_pos_listener)return;
-  p._etiq_pos_listener=true;
-  p.addEventListener('message',function(e){{
-    if(!e.data||e.data.type!=='etiq_pos')return;
-    var idx=e.data.idx;
-    var jsonStr=e.data.json||'{{}}';
-    var inp=p.document.querySelector('input[placeholder="__bridge_'+idx+'__"]');
-    if(!inp){{
-      console.warn('[etiq_bridge] input nao encontrado para idx='+idx);
-      return;
-    }}
-    var setter=Object.getOwnPropertyDescriptor(p.HTMLInputElement.prototype,'value').set;
-    setter.call(inp,jsonStr);
-    inp.dispatchEvent(new p.Event('input',{{bubbles:true}}));
-    inp.focus();inp.blur();
-    console.log('[etiq_bridge] bridge atualizado idx='+idx+' json='+jsonStr);
-  }});
-  console.log('[etiq_bridge] listener registrado');
-}})();
-</script></body></html>"""
-                                    st.components.v1.html(_listener_html, height=0)
                                     st.caption("💡 Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar · ao soltar, os campos acima atualizam automaticamente.")
                                     _canvas_html = _html_drag_etiqueta_canvas(
                                         tipo_etiqueta=_tipo,
