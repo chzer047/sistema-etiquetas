@@ -13872,30 +13872,33 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
 
                                 # --- Canvas unificado: pilha + logo no mesmo preview ---
                                 if _tem_pilha_det or _usar_logo_i:
-                                    # Injeta listener no parent (com guard p/ não duplicar)
-                                    # Usa um st.text_input bridge (aria-label="bridge_{_i}") como
-                                    # canal seguro: canvas → postMessage → bridge input → rerun Streamlit
-                                    st.markdown("""<script>
-if(!window._etiq_pos_listener){
-  window._etiq_pos_listener=true;
-  window.addEventListener('message',function(e){
-    if(!e.data||e.data.type!=='etiq_pos')return;
-    var idx=e.data.idx;
-    var jsonStr=e.data.json||'{}';
-    var inp=document.querySelector('input[aria-label="bridge_'+idx+'"]');
-    if(!inp)return;
-    var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
-    setter.call(inp,jsonStr);
-    inp.dispatchEvent(new Event('input',{bubbles:true}));
-    inp.dispatchEvent(new Event('change',{bubbles:true}));
-  });
-}
-</script>""", unsafe_allow_html=True)
                                     # Bridge invisível: JS escreve JSON aqui → Streamlit rerun → Python aplica posições
                                     st.text_input(f"bridge_{_i}", value="", label_visibility="collapsed", key=f"_bridge_{_i}")
                                     st.markdown(f"""<style>
-div[data-testid="stTextInput"]:has(input[aria-label="bridge_{_i}"]){{display:none}}
+div[data-testid="stTextInput"]:has(input[aria-label="bridge_{_i}"]){{display:none!important;height:0!important}}
 </style>""", unsafe_allow_html=True)
+                                    # Listener injetado via iframe (scripts em iframes EXECUTAM, ao contrário de
+                                    # st.markdown que usa dangerouslySetInnerHTML e bloqueia <script>).
+                                    # Acessa window.parent para escutar postMessages do canvas e atualizar o bridge.
+                                    _listener_html = f"""<!DOCTYPE html><html><body><script>
+(function(){{
+  var p=window.parent;
+  if(p._etiq_pos_listener)return;
+  p._etiq_pos_listener=true;
+  p.addEventListener('message',function(e){{
+    if(!e.data||e.data.type!=='etiq_pos')return;
+    var idx=e.data.idx;
+    var jsonStr=e.data.json||'{{}}';
+    var inp=p.document.querySelector('input[aria-label="bridge_'+idx+'"]');
+    if(!inp)return;
+    var setter=Object.getOwnPropertyDescriptor(p.HTMLInputElement.prototype,'value').set;
+    setter.call(inp,jsonStr);
+    inp.dispatchEvent(new p.Event('input',{{bubbles:true}}));
+    inp.focus();inp.blur();
+  }});
+}})();
+</script></body></html>"""
+                                    st.components.v1.html(_listener_html, height=0)
                                     st.caption("💡 Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar · ao soltar, os campos acima atualizam automaticamente.")
                                     _canvas_html = _html_drag_etiqueta_canvas(
                                         tipo_etiqueta=_tipo,
