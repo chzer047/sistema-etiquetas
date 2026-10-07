@@ -5635,7 +5635,11 @@ document.addEventListener('mouseup',function(){{
       msg.logo_w=+(lgEl.offsetWidth/S).toFixed(2);
       msg.logo_hh=+(lgEl.offsetHeight/S).toFixed(2);
     }}
-    window.parent.postMessage(msg,'*');
+    var posJson=JSON.stringify({{
+      logo_h:msg.logo_h,logo_v:msg.logo_v,logo_w:msg.logo_w,logo_hh:msg.logo_hh,
+      pilha_h:msg.pilha_h,pilha_v:msg.pilha_v,pilha_w:msg.pilha_w,pilha_hh:msg.pilha_hh
+    }});
+    window.parent.postMessage({{type:'etiq_pos',idx:ITEM_IDX,json:posJson}},'*');
   }}
   cur=null;
 }});
@@ -13810,6 +13814,25 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 _idade_uni_cur = st.session_state.get(f"idadeuni_{_i}", 'ANOS')
                                 _tem_chorao_prev = bool(_tipo_chorao_prev == 'chorao18' or _idade_uni_cur == 'ANOS')
 
+                                # Lê bridge do canvas e aplica posições ao session_state ANTES de criar inputs
+                                _bridge_raw = st.session_state.get(f"_bridge_{_i}", "")
+                                if _bridge_raw:
+                                    try:
+                                        import json as _json
+                                        _bpos = _json.loads(_bridge_raw)
+                                        _clamp = lambda v, mn, mx: max(mn, min(mx, float(v)))
+                                        if 'logo_h'   in _bpos: st.session_state[f"logo_pos_h_{_i}"] = _clamp(_bpos['logo_h'],   0.0, 12.0)
+                                        if 'logo_v'   in _bpos: st.session_state[f"logo_pos_v_{_i}"] = _clamp(_bpos['logo_v'],   0.0, 15.0)
+                                        if 'logo_w'   in _bpos: st.session_state[f"logo_w_{_i}"]     = _clamp(_bpos['logo_w'],   0.5, 11.0)
+                                        if 'logo_hh'  in _bpos: st.session_state[f"logo_hh_{_i}"]    = _clamp(_bpos['logo_hh'],  0.3,  8.0)
+                                        if 'pilha_h'  in _bpos: st.session_state[f"pilha_pos_h_{_i}"]= _clamp(_bpos['pilha_h'],  0.0, 10.0)
+                                        if 'pilha_v'  in _bpos: st.session_state[f"pilha_pos_v_{_i}"]= _clamp(_bpos['pilha_v'], -2.0,  5.0)
+                                        if 'pilha_w'  in _bpos: st.session_state[f"pilha_w_{_i}"]    = _clamp(_bpos['pilha_w'],  0.3,  4.0)
+                                        if 'pilha_hh' in _bpos: st.session_state[f"pilha_hh_{_i}"]   = _clamp(_bpos['pilha_hh'], 0.3,  4.0)
+                                    except Exception:
+                                        pass
+                                    st.session_state[f"_bridge_{_i}"] = ""
+
                                 # --- Posição da imagem de pilha (apenas itens pilha) ---
                                 _pilha_b64_prev = None
                                 if _tem_pilha_det:
@@ -13850,30 +13873,29 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 # --- Canvas unificado: pilha + logo no mesmo preview ---
                                 if _tem_pilha_det or _usar_logo_i:
                                     # Injeta listener no parent (com guard p/ não duplicar)
+                                    # Usa um st.text_input bridge (aria-label="bridge_{_i}") como
+                                    # canal seguro: canvas → postMessage → bridge input → rerun Streamlit
                                     st.markdown("""<script>
 if(!window._etiq_pos_listener){
   window._etiq_pos_listener=true;
   window.addEventListener('message',function(e){
     if(!e.data||e.data.type!=='etiq_pos')return;
     var idx=e.data.idx;
-    function setInp(al,val){
-      var inp=document.querySelector('input[aria-label="'+al+'"]');
-      if(!inp)return;
-      var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
-      s.call(inp,String(parseFloat(val).toFixed(2)));
-      inp.dispatchEvent(new Event('input',{bubbles:true}));
-    }
-    if(e.data.logo_h!==undefined)setInp('lh_'+idx,e.data.logo_h);
-    if(e.data.logo_v!==undefined)setInp('lv_'+idx,e.data.logo_v);
-    if(e.data.logo_w!==undefined)setInp('lw_'+idx,e.data.logo_w);
-    if(e.data.logo_hh!==undefined)setInp('lhh_'+idx,e.data.logo_hh);
-    if(e.data.pilha_h!==undefined)setInp('ph_'+idx,e.data.pilha_h);
-    if(e.data.pilha_v!==undefined)setInp('pv_'+idx,e.data.pilha_v);
-    if(e.data.pilha_w!==undefined)setInp('pw_'+idx,e.data.pilha_w);
-    if(e.data.pilha_hh!==undefined)setInp('phh_'+idx,e.data.pilha_hh);
+    var jsonStr=e.data.json||'{}';
+    var inp=document.querySelector('input[aria-label="bridge_'+idx+'"]');
+    if(!inp)return;
+    var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+    setter.call(inp,jsonStr);
+    inp.dispatchEvent(new Event('input',{bubbles:true}));
+    inp.dispatchEvent(new Event('change',{bubbles:true}));
   });
 }
 </script>""", unsafe_allow_html=True)
+                                    # Bridge invisível: JS escreve JSON aqui → Streamlit rerun → Python aplica posições
+                                    st.text_input(f"bridge_{_i}", value="", label_visibility="collapsed", key=f"_bridge_{_i}")
+                                    st.markdown(f"""<style>
+div[data-testid="stTextInput"]:has(input[aria-label="bridge_{_i}"]){{display:none}}
+</style>""", unsafe_allow_html=True)
                                     st.caption("💡 Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar · ao soltar, os campos acima atualizam automaticamente.")
                                     _canvas_html = _html_drag_etiqueta_canvas(
                                         tipo_etiqueta=_tipo,
