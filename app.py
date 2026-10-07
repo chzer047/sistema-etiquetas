@@ -13873,13 +13873,14 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 # --- Canvas unificado: pilha + logo no mesmo preview ---
                                 if _tem_pilha_det or _usar_logo_i:
                                     # Bridge invisível: JS escreve JSON aqui → Streamlit rerun → Python aplica posições
-                                    st.text_input(f"bridge_{_i}", value="", label_visibility="collapsed", key=f"_bridge_{_i}")
+                                    st.text_input(f"bridge_{_i}", value="", label_visibility="collapsed", key=f"_bridge_{_i}", placeholder=f"__bridge_{_i}__")
                                     st.markdown(f"""<style>
-div[data-testid="stTextInput"]:has(input[aria-label="bridge_{_i}"]){{display:none!important;height:0!important}}
+div[data-testid="stTextInput"]:has(input[placeholder="__bridge_{_i}__"]){{display:none!important;height:0!important}}
 </style>""", unsafe_allow_html=True)
                                     # Listener injetado via iframe (scripts em iframes EXECUTAM, ao contrário de
                                     # st.markdown que usa dangerouslySetInnerHTML e bloqueia <script>).
                                     # Acessa window.parent para escutar postMessages do canvas e atualizar o bridge.
+                                    # Usa placeholder como seletor porque aria-label pode não ser definido com label_visibility="collapsed".
                                     _listener_html = f"""<!DOCTYPE html><html><body><script>
 (function(){{
   var p=window.parent;
@@ -13889,13 +13890,18 @@ div[data-testid="stTextInput"]:has(input[aria-label="bridge_{_i}"]){{display:non
     if(!e.data||e.data.type!=='etiq_pos')return;
     var idx=e.data.idx;
     var jsonStr=e.data.json||'{{}}';
-    var inp=p.document.querySelector('input[aria-label="bridge_'+idx+'"]');
-    if(!inp)return;
+    var inp=p.document.querySelector('input[placeholder="__bridge_'+idx+'__"]');
+    if(!inp){{
+      console.warn('[etiq_bridge] input nao encontrado para idx='+idx);
+      return;
+    }}
     var setter=Object.getOwnPropertyDescriptor(p.HTMLInputElement.prototype,'value').set;
     setter.call(inp,jsonStr);
     inp.dispatchEvent(new p.Event('input',{{bubbles:true}}));
     inp.focus();inp.blur();
+    console.log('[etiq_bridge] bridge atualizado idx='+idx+' json='+jsonStr);
   }});
+  console.log('[etiq_bridge] listener registrado');
 }})();
 </script></body></html>"""
                                     st.components.v1.html(_listener_html, height=0)
