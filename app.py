@@ -5369,7 +5369,7 @@ def _html_drag_etiqueta_canvas(
     pilha_b64=None, pilha_h_cm=1.767, pilha_v_cm=0.172, pilha_w_cm=1.0, pilha_hh_cm=0.95,
     logo_b64=None, logo_h_cm=0.5, logo_v_cm=5.0, logo_w_cm=2.0, logo_hh_cm=1.0,
     cliente_info=None, item_nome='', item_ref='', item_qtd='',
-    textos_dir=None, tem_chorao=False,
+    textos_dir=None, tem_chorao=False, item_idx=0,
 ):
     """Canvas unificado: pilha (col. direita) + logo (livre) ambos arrastáveis.
     Tabela fiel 2×5.74cm, S=36px/cm. Só os elementos passados como não-None aparecem."""
@@ -5574,7 +5574,7 @@ body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}
   &nbsp;&nbsp;<span style="color:#888;font-size:10px">arraste · alça=redimensionar</span></div>
 <script>
 (function(){{
-const S={S};
+const S={S},ITEM_IDX={item_idx};
 let COL={COL},TBL_W={TBL_W};
 const wrap=document.getElementById('wrap');
 let ADV={ADV_FALLBACK};
@@ -5617,7 +5617,28 @@ document.addEventListener('mousemove',function(e){{
     cur.el.style.width=nw+'px';cur.el.style.height=nh+'px';cur.upd();
   }}
 }});
-document.addEventListener('mouseup',function(){{cur=null;}});
+document.addEventListener('mouseup',function(){{
+  if(cur){{
+    var pgEl=document.getElementById('pg'),lgEl=document.getElementById('lg');
+    var msg={{type:'etiq_pos',idx:ITEM_IDX}};
+    if(pgEl){{
+      var pl=parseInt(pgEl.style.left)||0,pt=parseInt(pgEl.style.top)||0;
+      msg.pilha_h=+((pl-COL)/S).toFixed(2);
+      msg.pilha_v=+((pt-ADV)/S).toFixed(2);
+      msg.pilha_w=+(pgEl.offsetWidth/S).toFixed(2);
+      msg.pilha_hh=+(pgEl.offsetHeight/S).toFixed(2);
+    }}
+    if(lgEl){{
+      var ll=parseInt(lgEl.style.left)||0,lt=parseInt(lgEl.style.top)||0;
+      msg.logo_h=+(ll/S).toFixed(2);
+      msg.logo_v=+(lt/S).toFixed(2);
+      msg.logo_w=+(lgEl.offsetWidth/S).toFixed(2);
+      msg.logo_hh=+(lgEl.offsetHeight/S).toFixed(2);
+    }}
+    window.parent.postMessage(msg,'*');
+  }}
+  cur=null;
+}});
 
 // --- Pilha ---
 (function(){{
@@ -13795,11 +13816,13 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                     st.markdown("**📍 Posição e tamanho da imagem de pilha:**")
                                     _pc1, _pc2 = st.columns(2)
                                     with _pc1:
-                                        _pp_h = st.number_input("H (cm, da esquerda)", 0.0, 10.0, 1.767, 0.05, key=f"pilha_pos_h_{_i}", format="%.2f")
-                                        _pp_v = st.number_input("V (cm, do topo ADVERTÊNCIA)", -2.0, 5.0, 0.172, 0.05, key=f"pilha_pos_v_{_i}", format="%.2f")
+                                        st.caption("H (cm, esquerda)  ·  V (cm, ADVERTÊNCIA)")
+                                        _pp_h = st.number_input(f"ph_{_i}", 0.0, 10.0, 1.767, 0.05, key=f"pilha_pos_h_{_i}", format="%.2f", label_visibility="collapsed")
+                                        _pp_v = st.number_input(f"pv_{_i}", -2.0, 5.0, 0.172, 0.05, key=f"pilha_pos_v_{_i}", format="%.2f", label_visibility="collapsed")
                                     with _pc2:
-                                        _pp_w = st.number_input("Largura (cm)", 0.3, 4.0, 1.0, 0.05, key=f"pilha_w_{_i}", format="%.2f")
-                                        _pp_hh = st.number_input("Altura (cm)", 0.3, 4.0, 0.95, 0.05, key=f"pilha_hh_{_i}", format="%.2f")
+                                        st.caption("Largura (cm)  ·  Altura (cm)")
+                                        _pp_w = st.number_input(f"pw_{_i}", 0.3, 4.0, 1.0, 0.05, key=f"pilha_w_{_i}", format="%.2f", label_visibility="collapsed")
+                                        _pp_hh = st.number_input(f"phh_{_i}", 0.3, 4.0, 0.95, 0.05, key=f"pilha_hh_{_i}", format="%.2f", label_visibility="collapsed")
                                     _pilha_bytes_prev2, _ = buscar_asset_generico("pilha")
                                     _pilha_b64_prev = _b64_prev.b64encode(_pilha_bytes_prev2).decode() if _pilha_bytes_prev2 else None
                                 else:
@@ -13816,15 +13839,42 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         _logo_b64_for_canvas = _b64_prev.b64encode(_logo_bytes_cur).decode()
                                         _lc1, _lc2 = st.columns(2)
                                         with _lc1:
-                                            _lh = st.number_input("H (cm, da esquerda)", 0.0, 12.0, 0.5, 0.05, key=f"logo_pos_h_{_i}", format="%.2f")
-                                            _lv = st.number_input("V (cm, do topo)", 0.0, 15.0, 5.0, 0.05, key=f"logo_pos_v_{_i}", format="%.2f")
+                                            st.caption("H (cm, esquerda)  ·  V (cm, topo)")
+                                            _lh = st.number_input(f"lh_{_i}", 0.0, 12.0, 0.5, 0.05, key=f"logo_pos_h_{_i}", format="%.2f", label_visibility="collapsed")
+                                            _lv = st.number_input(f"lv_{_i}", 0.0, 15.0, 5.0, 0.05, key=f"logo_pos_v_{_i}", format="%.2f", label_visibility="collapsed")
                                         with _lc2:
-                                            _lw = st.number_input("Largura (cm)", 0.5, 11.0, 2.0, 0.05, key=f"logo_w_{_i}", format="%.2f")
-                                            _lhh = st.number_input("Altura (cm)", 0.3, 8.0, 1.0, 0.05, key=f"logo_hh_{_i}", format="%.2f")
+                                            st.caption("Largura (cm)  ·  Altura (cm)")
+                                            _lw = st.number_input(f"lw_{_i}", 0.5, 11.0, 2.0, 0.05, key=f"logo_w_{_i}", format="%.2f", label_visibility="collapsed")
+                                            _lhh = st.number_input(f"lhh_{_i}", 0.3, 8.0, 1.0, 0.05, key=f"logo_hh_{_i}", format="%.2f", label_visibility="collapsed")
 
                                 # --- Canvas unificado: pilha + logo no mesmo preview ---
                                 if _tem_pilha_det or _usar_logo_i:
-                                    st.caption("💡 Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar · leia valores e ajuste os campos acima para posição exata.")
+                                    # Injeta listener no parent (com guard p/ não duplicar)
+                                    st.markdown("""<script>
+if(!window._etiq_pos_listener){
+  window._etiq_pos_listener=true;
+  window.addEventListener('message',function(e){
+    if(!e.data||e.data.type!=='etiq_pos')return;
+    var idx=e.data.idx;
+    function setInp(al,val){
+      var inp=document.querySelector('input[aria-label="'+al+'"]');
+      if(!inp)return;
+      var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+      s.call(inp,String(parseFloat(val).toFixed(2)));
+      inp.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+    if(e.data.logo_h!==undefined)setInp('lh_'+idx,e.data.logo_h);
+    if(e.data.logo_v!==undefined)setInp('lv_'+idx,e.data.logo_v);
+    if(e.data.logo_w!==undefined)setInp('lw_'+idx,e.data.logo_w);
+    if(e.data.logo_hh!==undefined)setInp('lhh_'+idx,e.data.logo_hh);
+    if(e.data.pilha_h!==undefined)setInp('ph_'+idx,e.data.pilha_h);
+    if(e.data.pilha_v!==undefined)setInp('pv_'+idx,e.data.pilha_v);
+    if(e.data.pilha_w!==undefined)setInp('pw_'+idx,e.data.pilha_w);
+    if(e.data.pilha_hh!==undefined)setInp('phh_'+idx,e.data.pilha_hh);
+  });
+}
+</script>""", unsafe_allow_html=True)
+                                    st.caption("💡 Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar · ao soltar, os campos acima atualizam automaticamente.")
                                     _canvas_html = _html_drag_etiqueta_canvas(
                                         tipo_etiqueta=_tipo,
                                         pilha_b64=_pilha_b64_prev if _tem_pilha_det else None,
@@ -13839,6 +13889,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         item_qtd=str(_item.get('qtd', '')),
                                         textos_dir=_textos_dir_prev,
                                         tem_chorao=_tem_chorao_prev,
+                                        item_idx=_i,
                                     )
                                     _stc_prev.html(_canvas_html, height=520)
 
