@@ -4676,11 +4676,11 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         p0.alignment = _ALIGN.LEFT
         p0.add_run().add_picture(_Bio(selo_png), width=_Cm(LARG_SELO), height=_Cm(ALT_SELO))
 
-    # Logo do cliente: âncora flutuante na coluna esquerda, posição configurável
+    # Logo do cliente: âncora flutuante ancorada em p0 (PRIMEIRO parágrafo da
+    # coluna esquerda) para que pos_v_cm=0 corresponda ao TOPO da célula,
+    # igual ao sistema de coordenadas do canvas de preview (V = do topo do label).
     if logo_png:
-        _p_logo = cell_esq.add_paragraph()
-        _p_logo.paragraph_format.space_after = _Pt(0)
-        _run_logo = _p_logo.add_run()
+        _run_logo = p0.add_run()
         _run_logo.add_picture(_Bio(logo_png), width=_Cm(logo_largura_cm), height=_Cm(logo_altura_cm))
         _tornar_imagem_flutuante_xy(
             _run_logo, doc_pr_id=400,
@@ -5439,8 +5439,10 @@ def _html_drag_etiqueta_canvas(
         f'<p style="font-family:Arial,sans-serif;font-size:9px;line-height:1.25;margin:0">'
         f'SAC: {sac}</p>'
     )
+    # bc-measure: invisível mas reserva espaço real no layout da célula.
+    # O JS mede sua posição e cria o #bc draggable sobre ele.
     if tipo_etiqueta == 'pilha':
-        esq += ref_barras
+        esq += f'<div id="bc-measure" style="visibility:hidden">{ref_barras}</div>'
 
     dir_html = ''
     adv_set = False
@@ -5477,9 +5479,18 @@ def _html_drag_etiqueta_canvas(
     if not adv_set:
         dir_html += '<p id="adv-block" style="height:0;margin:0"></p>\n'
     if tipo_etiqueta != 'pilha':
-        dir_html += ref_barras
+        dir_html += f'<div id="bc-measure" style="visibility:hidden">{ref_barras}</div>'
 
     footer = '&ldquo;GUARDAR A EMBALAGEM POR CONTER INFORMAÇÕES IMPORTANTES&rdquo;'
+
+    # Draggable barcode element (always present; JS will show + position it)
+    bc_el = (
+        f'<div id="bc" style="position:absolute;left:0;top:0;cursor:move;'
+        f'border:2px dashed #28a745;z-index:22;display:none">'
+        f'{ref_barras}'
+        f'<div id="bcrh" style="position:absolute;bottom:-1px;right:-1px;width:12px;'
+        f'height:12px;background:#28a745;cursor:se-resize"></div></div>'
+    )
 
     # Draggable pilha element (positioned over wrap)
     if tem_pilha:
@@ -5540,10 +5551,12 @@ def _html_drag_etiqueta_canvas(
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}}
-#lbl{{border-collapse:collapse;table-layout:fixed;width:{TBL_W}px}}
-#lbl td{{border:1px solid #000;padding:3px 4px;vertical-align:top;overflow:hidden;width:{COL}px}}
+#lbl{{border-collapse:collapse;table-layout:fixed;width:100%}}
+#lbl td{{border:1px solid #000;padding:3px 4px;vertical-align:top;overflow:hidden;width:50%;word-break:break-word}}
 #foot{{text-align:center;font-family:Arial,sans-serif;font-size:11px;font-weight:bold;padding:3px 4px}}
-#wrap{{position:relative;display:inline-block}}
+#wrap{{position:relative;display:inline-block;resize:horizontal;overflow:hidden;width:{TBL_W}px;min-width:200px}}
+#bc{{position:absolute;cursor:move;border:2px dashed #28a745;z-index:22;display:none}}
+#bcrh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#28a745;cursor:se-resize}}
 #cd{{font-size:11px;color:{coord_color};font-family:monospace;margin-top:4px;padding:3px 7px;
   background:#f8f8f8;border-radius:3px;border:1px solid #ddd;display:inline-block}}
 </style></head><body>
@@ -5555,15 +5568,23 @@ body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}
 </tr>
 <tr><td colspan="2" id="foot">{footer}</td></tr>
 </table>
-{pilha_el}{logo_el}
+{pilha_el}{logo_el}{bc_el}
 </div>
 <div id="cd">{coord_html}
   &nbsp;&nbsp;<span style="color:#888;font-size:10px">arraste · alça=redimensionar</span></div>
 <script>
 (function(){{
-const S={S},COL={COL},TBL_W={TBL_W};
+const S={S};
+let COL={COL},TBL_W={TBL_W};
 const wrap=document.getElementById('wrap');
 let ADV={ADV_FALLBACK};
+// Sync TBL_W/COL when user resizes the canvas horizontally
+if(window.ResizeObserver){{
+  new ResizeObserver(function(entries){{
+    TBL_W=entries[0].contentRect.width;
+    COL=TBL_W/2;
+  }}).observe(wrap);
+}}
 function fmt(n){{return(Math.round(n*20)/20).toFixed(2)}}
 
 // Shared drag state: only one element active at a time
@@ -5644,7 +5665,21 @@ document.addEventListener('mouseup',function(){{cur=null;}});
   upd();
 }})();
 
-// ADV recalc after layout
+// --- Barcode (visual-only, livre) ---
+(function(){{
+  const el=document.getElementById('bc');if(!el)return;
+  const rh=document.getElementById('bcrh');
+  function upd(){{}}  // visual only, no coord display
+  el.addEventListener('mousedown',function(e){{
+    if(e.target===rh)return;
+    startDrag(el,e,upd,0,()=>TBL_W,0,()=>9999);
+  }});
+  if(rh)rh.addEventListener('mousedown',function(e){{
+    startResize(el,e,upd,0,()=>TBL_W,0,()=>9999);
+  }});
+}})();
+
+// ADV recalc + BC overlay positioning after layout
 window.addEventListener('load',function(){{
   const advEl=document.getElementById('adv-block');
   if(advEl){{
@@ -5658,6 +5693,17 @@ window.addEventListener('load',function(){{
       if(pch)pch.textContent=fmt((l-COL)/S);
       if(pcv)pcv.textContent=fmt((t-ADV)/S);
     }}
+  }}
+  // Position #bc over its invisible #bc-measure placeholder
+  const bcm=document.getElementById('bc-measure');
+  const bc=document.getElementById('bc');
+  if(bcm&&bc){{
+    const wR=wrap.getBoundingClientRect(),mR=bcm.getBoundingClientRect();
+    bc.style.left=(mR.left-wR.left-2)+'px';
+    bc.style.top=(mR.top-wR.top-2)+'px';
+    bc.style.width=(mR.width+4)+'px';
+    bc.style.height=(mR.height+4)+'px';
+    bc.style.display='block';
   }}
 }});
 }})();
