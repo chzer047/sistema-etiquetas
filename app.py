@@ -5617,7 +5617,7 @@ body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}
 #lbl{{border-collapse:collapse;table-layout:fixed;width:100%}}
 #lbl td{{border:1px solid #000;padding:3px 4px;vertical-align:top;overflow:hidden;width:50%;word-break:break-word}}
 #foot{{text-align:center;font-family:Arial,sans-serif;font-size:11px;font-weight:bold;padding:3px 4px}}
-#wrap{{position:relative;display:inline-block;resize:both;overflow:hidden;width:{TBL_W}px;min-width:200px;height:{WRAP_H}px;min-height:80px}}
+#wrap{{position:relative;display:inline-block;resize:both;overflow:hidden;width:{TBL_W}px;min-width:200px;min-height:80px}}
 #bc{{position:absolute;cursor:move;border:2px dashed #28a745;z-index:22;display:none}}
 #bcrh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#28a745;cursor:se-resize}}
 #cd{{font-size:11px;color:{coord_color};font-family:monospace;margin-top:4px;padding:3px 7px;
@@ -5641,15 +5641,16 @@ const S={S},ITEM_IDX={item_idx};
 let COL={COL},TBL_W={TBL_W},WRAP_H={WRAP_H};
 const wrap=document.getElementById('wrap');
 let ADV={ADV_FALLBACK};
-// Sync TBL_W/COL/WRAP_H when user resizes the canvas; send label dims after settle
+// Sync TBL_W/COL/WRAP_H when user resizes; skip initial fires, send only on user resize
 if(window.ResizeObserver){{
-  var _rsTimer=null;
+  var _rsTimer=null,_rsSkip=2;
   new ResizeObserver(function(entries){{
     var r=entries[0].contentRect;
     TBL_W=r.width; WRAP_H=r.height; COL=TBL_W/2;
     var clwEl=document.getElementById('clw'),clhEl=document.getElementById('clh');
     if(clwEl)clwEl.textContent=(TBL_W/S).toFixed(2);
     if(clhEl)clhEl.textContent=(WRAP_H/S).toFixed(2);
+    if(_rsSkip>0){{_rsSkip--;return;}}
     clearTimeout(_rsTimer);
     _rsTimer=setTimeout(function(){{
       window.parent.postMessage({{type:'etiq_pos',idx:ITEM_IDX,
