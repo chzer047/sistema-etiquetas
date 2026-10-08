@@ -4492,7 +4492,8 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
                             pilha_pos_h_cm=1.767, pilha_pos_v_cm=0.172,
                             pilha_largura_cm=1.0, pilha_altura_cm=0.95,
                             logo_png=None, logo_pos_h_cm=0.5, logo_pos_v_cm=1.0,
-                            logo_largura_cm=2.0, logo_altura_cm=1.0):
+                            logo_largura_cm=2.0, logo_altura_cm=1.0,
+                            larg_col_cm=5.74, altura_linha_cm=None):
     """Monta uma etiqueta (tabela 2 colunas) dentro do documento `doc`.
     Medidas extraídas do padrão real da empresa:
     - Fonte Arial 7pt (corpo), 8,5pt (prefixo ATENÇÃO/INDICAÇÃO/ADVERTÊNCIA e rodapé), 8pt (referência/nome)
@@ -4509,11 +4510,11 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
     TAM_CORPO = 7      # tamanho principal (padrão real)
     TAM_PREFIXO = 8.5  # prefixo "ATENÇÃO:" / "INDICAÇÃO:" / "ADVERTÊNCIA:" e rodapé
     TAM_REF = 8        # referência/nome
-    LARG_COL = 5.74    # cada coluna (total 11.48cm)
+    LARG_COL = larg_col_cm
     _compacto = variante_selo in ("compacto_cor", "compacto_pb")
-    LARG_SELO = 2.0 if _compacto else 5.54
+    LARG_SELO = 2.0 if _compacto else min(5.54, LARG_COL - 0.2)
     ALT_SELO  = 2.0 if _compacto else 2.5
-    LARG_BARRAS = 5.34 # largura do código de barras
+    LARG_BARRAS = min(5.34, LARG_COL - 0.4)
     ALT_BARRAS = 2.24  # altura — proporção 2,39:1 (medida do codigo_de_barras.docx)
 
     def _fmt(run, tam=TAM_CORPO, bold=False):
@@ -4717,6 +4718,14 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
     for row in tabela.rows:
         row.cells[0].width = _Cm(LARG_COL)
         row.cells[1].width = _Cm(LARG_COL)
+
+    if altura_linha_cm:
+        _twips = int(altura_linha_cm * 567)
+        _trPr = tabela.rows[0]._tr.get_or_add_trPr()
+        _trH = _OxmlElement('w:trHeight')
+        _trH.set(_qn('w:val'), str(_twips))
+        _trH.set(_qn('w:hRule'), 'atLeast')
+        _trPr.append(_trH)
 
     # ---- ESQUERDA ----
     cell_esq = tabela.cell(0, 0)
@@ -5421,12 +5430,14 @@ def _html_drag_etiqueta_canvas(
     logo_b64=None, logo_h_cm=0.5, logo_v_cm=5.0, logo_w_cm=2.0, logo_hh_cm=1.0,
     cliente_info=None, item_nome='', item_ref='', item_qtd='',
     textos_dir=None, tem_chorao=False, item_idx=0,
+    larg_cm=11.48, alt_cm=5.74,
 ):
     """Canvas unificado: pilha (col. direita) + logo (livre) ambos arrastáveis.
-    Tabela fiel 2×5.74cm, S=36px/cm. Só os elementos passados como não-None aparecem."""
+    Dimensões configuráveis via larg_cm/alt_cm, S=36px/cm. Só os elementos não-None aparecem."""
     S = 36
-    COL = int(5.74 * S)   # 206 px
-    TBL_W = COL * 2 + 2   # 414 px
+    COL = int((larg_cm / 2) * S)
+    TBL_W = COL * 2 + 2
+    WRAP_H = int(alt_cm * S)
     SEAL_W = min(int(5.54 * S), COL - 8)
     SEAL_H = int(2.5  * S)
     BAR_W  = min(int(5.34 * S), COL - 8)
@@ -5595,7 +5606,8 @@ def _html_drag_etiqueta_canvas(
             f'W=<b id="lcw">{logo_w_cm:.2f}</b>cm &nbsp;'
             f'A=<b id="lca">{logo_hh_cm:.2f}</b>cm'
         )
-    coord_html = ' &nbsp;|&nbsp; '.join(coord_parts)
+    _label_dims = f'📐 <b id="clw">{larg_cm:.2f}</b>×<b id="clh">{alt_cm:.2f}</b>cm'
+    coord_html = (' &nbsp;|&nbsp; '.join(coord_parts) + (' &nbsp;|&nbsp; ' if coord_parts else '')) + _label_dims
     coord_color = '#1a6bcc' if not tem_pilha else ('#b85800' if not tem_logo else '#333')
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -5605,7 +5617,7 @@ body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}
 #lbl{{border-collapse:collapse;table-layout:fixed;width:100%}}
 #lbl td{{border:1px solid #000;padding:3px 4px;vertical-align:top;overflow:hidden;width:50%;word-break:break-word}}
 #foot{{text-align:center;font-family:Arial,sans-serif;font-size:11px;font-weight:bold;padding:3px 4px}}
-#wrap{{position:relative;display:inline-block;resize:horizontal;overflow:hidden;width:{TBL_W}px;min-width:200px}}
+#wrap{{position:relative;display:inline-block;resize:both;overflow:hidden;width:{TBL_W}px;min-width:200px;height:{WRAP_H}px;min-height:80px}}
 #bc{{position:absolute;cursor:move;border:2px dashed #28a745;z-index:22;display:none}}
 #bcrh{{position:absolute;bottom:-1px;right:-1px;width:12px;height:12px;background:#28a745;cursor:se-resize}}
 #cd{{font-size:11px;color:{coord_color};font-family:monospace;margin-top:4px;padding:3px 7px;
@@ -5626,14 +5638,23 @@ body{{font-family:Arial,sans-serif;background:#fff;padding:4px;user-select:none}
 <script>
 (function(){{
 const S={S},ITEM_IDX={item_idx};
-let COL={COL},TBL_W={TBL_W};
+let COL={COL},TBL_W={TBL_W},WRAP_H={WRAP_H};
 const wrap=document.getElementById('wrap');
 let ADV={ADV_FALLBACK};
-// Sync TBL_W/COL when user resizes the canvas horizontally
+// Sync TBL_W/COL/WRAP_H when user resizes the canvas; send label dims after settle
 if(window.ResizeObserver){{
+  var _rsTimer=null;
   new ResizeObserver(function(entries){{
-    TBL_W=entries[0].contentRect.width;
-    COL=TBL_W/2;
+    var r=entries[0].contentRect;
+    TBL_W=r.width; WRAP_H=r.height; COL=TBL_W/2;
+    var clwEl=document.getElementById('clw'),clhEl=document.getElementById('clh');
+    if(clwEl)clwEl.textContent=(TBL_W/S).toFixed(2);
+    if(clhEl)clhEl.textContent=(WRAP_H/S).toFixed(2);
+    clearTimeout(_rsTimer);
+    _rsTimer=setTimeout(function(){{
+      window.parent.postMessage({{type:'etiq_pos',idx:ITEM_IDX,
+        json:JSON.stringify({{label_w:+(TBL_W/S).toFixed(2),label_h:+(WRAP_H/S).toFixed(2)}})}},'*');
+    }},400);
   }}).observe(wrap);
 }}
 function fmt(n){{return(Math.round(n*20)/20).toFixed(2)}}
@@ -5688,7 +5709,8 @@ document.addEventListener('mouseup',function(){{
     }}
     var posJson=JSON.stringify({{
       logo_h:msg.logo_h,logo_v:msg.logo_v,logo_w:msg.logo_w,logo_hh:msg.logo_hh,
-      pilha_h:msg.pilha_h,pilha_v:msg.pilha_v,pilha_w:msg.pilha_w,pilha_hh:msg.pilha_hh
+      pilha_h:msg.pilha_h,pilha_v:msg.pilha_v,pilha_w:msg.pilha_w,pilha_hh:msg.pilha_hh,
+      label_w:+(TBL_W/S).toFixed(2),label_h:+(wrap.offsetHeight/S).toFixed(2)
     }});
     window.parent.postMessage({{type:'etiq_pos',idx:ITEM_IDX,json:posJson}},'*');
   }}
@@ -5926,6 +5948,8 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
             logo_pos_v_cm=cfg.get('logo_pos_v', 5.0),
             logo_largura_cm=cfg.get('logo_largura_cm', 2.0),
             logo_altura_cm=cfg.get('logo_altura_cm', 1.0),
+            larg_col_cm=cfg.get('larg_col_cm', 5.74),
+            altura_linha_cm=cfg.get('altura_linha_cm'),
         )
 
         if idx < len(itens_config) - 1:
@@ -13887,8 +13911,20 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                             if 'pilha_v'  in _bpos: st.session_state[f"pilha_pos_v_{_i}"]= _clamp(_bpos['pilha_v'], -2.0,  5.0)
                                             if 'pilha_w'  in _bpos: st.session_state[f"pilha_w_{_i}"]    = _clamp(_bpos['pilha_w'],  0.3,  4.0)
                                             if 'pilha_hh' in _bpos: st.session_state[f"pilha_hh_{_i}"]   = _clamp(_bpos['pilha_hh'], 0.3,  4.0)
+                                            if 'label_w'  in _bpos: st.session_state[f"label_w_{_i}"]    = _clamp(_bpos['label_w'],  5.0, 30.0)
+                                            if 'label_h'  in _bpos: st.session_state[f"label_h_{_i}"]    = _clamp(_bpos['label_h'],  2.0, 20.0)
                                     except Exception:
                                         pass
+
+                                # --- Dimensões da etiqueta ---
+                                st.markdown("**📐 Dimensões da etiqueta:**")
+                                _dc1, _dc2 = st.columns(2)
+                                with _dc1:
+                                    st.caption("Largura total (cm)")
+                                    _label_w = st.number_input(f"lw_etiq_{_i}", 5.0, 30.0, 11.48, 0.1, key=f"label_w_{_i}", format="%.2f", label_visibility="collapsed")
+                                with _dc2:
+                                    st.caption("Altura (cm)")
+                                    _label_h = st.number_input(f"lh_etiq_{_i}", 2.0, 20.0, 5.74, 0.1, key=f"label_h_{_i}", format="%.2f", label_visibility="collapsed")
 
                                 # --- Posição da imagem de pilha (apenas itens pilha) ---
                                 _pilha_b64_prev = None
@@ -13928,8 +13964,8 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                             _lhh = st.number_input(f"lhh_{_i}", 0.3, 8.0, 1.0, 0.05, key=f"logo_hh_{_i}", format="%.2f", label_visibility="collapsed")
 
                                 # --- Canvas unificado: pilha + logo no mesmo preview ---
-                                if _tem_pilha_det or _usar_logo_i:
-                                    st.caption("💡 Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar · ao soltar, os campos acima atualizam automaticamente.")
+                                if True:
+                                    st.caption("💡 Redimensione o canvas (alça no canto inferior direito) para ajustar a etiqueta. Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar elemento.")
                                     _canvas_html = _html_drag_etiqueta_canvas(
                                         tipo_etiqueta=_tipo,
                                         pilha_b64=_pilha_b64_prev if _tem_pilha_det else None,
@@ -13945,8 +13981,10 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         textos_dir=_textos_dir_prev,
                                         tem_chorao=_tem_chorao_prev,
                                         item_idx=_i,
+                                        larg_cm=_label_w,
+                                        alt_cm=_label_h,
                                     )
-                                    _stc_prev.html(_canvas_html, height=520)
+                                    _stc_prev.html(_canvas_html, height=max(520, int(_label_h * 36) + 80))
 
                     with st.container(border=True):
                         st.markdown("##### 5️⃣ Gerar")
@@ -13982,6 +14020,8 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                         'logo_pos_v': st.session_state.get(f"logo_pos_v_{_i}", 5.0),
                                         'logo_largura_cm': st.session_state.get(f"logo_w_{_i}", 2.0),
                                         'logo_altura_cm': st.session_state.get(f"logo_hh_{_i}", 1.0),
+                                        'larg_col_cm': st.session_state.get(f"label_w_{_i}", 11.48) / 2,
+                                        'altura_linha_cm': st.session_state.get(f"label_h_{_i}", 5.74),
                                     })
                                 _chorao_bytes, _ = buscar_asset_generico("chorao")
                                 _pilha_bytes, _ = buscar_asset_generico("pilha")
