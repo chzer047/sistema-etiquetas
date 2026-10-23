@@ -12734,9 +12734,24 @@ if _is_active("etiquetas"):
                 return _resultado
 
             def _parse_word_etiqueta(table, _docx_bytes_global=_docx_bytes_global):
-                cell = table.rows[0].cells[0]
-                root = _ET.fromstring(_ET.tostring(cell._element, encoding='unicode'))
-                xml_str = _ET.tostring(cell._element, encoding='unicode')
+                # Coleta todas as células únicas da tabela (células mescladas aparecem
+                # repetidas — o set de id() evita contar duas vezes o mesmo elemento).
+                _seen_cell_ids = set()
+                _all_roots = []
+                _partes_texto = []
+                xml_str = ''
+                for _row in table.rows:
+                    for _c in _row.cells:
+                        if id(_c) in _seen_cell_ids:
+                            continue
+                        _seen_cell_ids.add(id(_c))
+                        _cell_xml = _ET.tostring(_c._element, encoding='unicode')
+                        xml_str += _cell_xml
+                        _cr = _ET.fromstring(_cell_xml)
+                        _all_roots.append(_cr)
+                        for _p in _cr.findall('.//w:p', _ns):
+                            _txts = [t.text for t in _p.findall('.//w:t', _ns) if t.text]
+                            _partes_texto.append(''.join(_txts))
 
                 # Junta o texto respeitando a estrutura de parágrafos do Word:
                 # - DENTRO de um parágrafo, sem espaço artificial entre runs -> evita
@@ -12744,28 +12759,27 @@ if _is_active("etiquetas"):
                 # - ENTRE parágrafos diferentes, insere espaço -> evita colar o fim de uma
                 #   linha com o início da próxima, ex: "...DE PLÁSTICO" + "MARCA: BLS TOYS"
                 #   virando "PLÁSTICOMARCA"
-                _paragrafos = root.findall('.//w:p', _ns)
-                _partes_texto = []
-                for _p in _paragrafos:
-                    _textos_paragrafo = [t.text for t in _p.findall('.//w:t', _ns) if t.text]
-                    _partes_texto.append(''.join(_textos_paragrafo))
                 texto = _re.sub(r'\s+', ' ', ' '.join(_partes_texto)).strip()
 
-
-                # Referência (em negrito)
+                # Referência (em negrito) — busca em todas as células
+                # Dependendo do tipo de produto, a referência pode estar na coluna
+                # esquerda (produtos à pilha) ou na coluna direita (demais).
                 referencia = None
-                for run in root.findall('.//w:r', _ns):
-                    rpr = run.find('w:rPr', _ns)
-                    if rpr is not None and rpr.find('w:b', _ns) is not None:
-                        t = run.find('w:t', _ns)
-                        if t is not None and t.text:
-                            bt = t.text.strip()
-                            # Remove apóstrofo/aspas inicial que o Excel/Word às vezes coloca
-                            # na frente de um texto pra forçá-lo como texto (ex: 'ZS-0207)
-                            bt = bt.lstrip("'\"`´")
-                            if _re.match(r'[A-Z0-9][\w-]+ - [A-ZÁÉÍÓÚÃÕÇ]', bt):
-                                referencia = bt
-                                break
+                for _cr in _all_roots:
+                    for run in _cr.findall('.//w:r', _ns):
+                        rpr = run.find('w:rPr', _ns)
+                        if rpr is not None and rpr.find('w:b', _ns) is not None:
+                            t = run.find('w:t', _ns)
+                            if t is not None and t.text:
+                                bt = t.text.strip()
+                                # Remove apóstrofo/aspas inicial que o Excel/Word às vezes coloca
+                                # na frente de um texto pra forçá-lo como texto (ex: 'ZS-0207)
+                                bt = bt.lstrip("'\"`´")
+                                if _re.match(r'[A-Z0-9][\w-]+ - [A-ZÁÉÍÓÚÃÕÇ]', bt):
+                                    referencia = bt
+                                    break
+                    if referencia:
+                        break
 
                 # Plano B: se a referência não veio em negrito (algumas etiquetas não
                 # marcam a referência em negrito de forma consistente), usa a ESTRUTURA
@@ -12878,8 +12892,8 @@ if _is_active("etiquetas"):
                                     _img = _Img2.open(_Bio2(_img_bytes))
                                     w, h = _img.size
 
-                                    # Chorão: JPEG pequeno ~123x129
-                                    if 100 <= w <= 150 and 100 <= h <= 160:
+                                    # Chorão: JPEG pequeno (tamanho pode variar ~77×81 a ~150×160 dependendo da resolução do arquivo)
+                                    if _ext in ('jpeg', 'jpg') and w <= 250 and h <= 250:
                                         tem_chorao = True
 
                                     # Bateria/pilha PNG
