@@ -4392,7 +4392,7 @@ def _selo_docx_para_png_metodo_antigo(selo_docx_bytes, soffice_path, coletar_err
              "--nofirststartwizard", "--nodefault", "--nolockcheck",
              f"-env:UserInstallation={_perfil}",
              "--convert-to", "png", "--outdir", _base, _docx_path],
-            capture_output=True, timeout=120, env=_env
+            capture_output=True, timeout=45, env=_env
         )
         _pngs = _glob.glob(_os.path.join(_base, "*.png"))
         return _res, _pngs, _base
@@ -5833,6 +5833,7 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
             textos_por_chave[(_row['tipo'], _row['categoria'], _row['titulo'])] = _row['conteudo']
 
     _cache_selo = {}
+    _lo_indisponivel = False  # True após primeiro timeout do LibreOffice — pula os seguintes
 
     doc = _Doc()
     for section in doc.sections:
@@ -5889,11 +5890,20 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
             else:
                 _selo_docx = gerar_selo_com_registro(cfg['variante'], registro)
                 if _selo_docx:
-                    _erros_conv = []
-                    selo_png = selo_docx_para_png(_selo_docx, soffice, coletar_erro=_erros_conv)
-                    if not selo_png and _erros_conv:
-                        for _e in _erros_conv:
-                            avisos.append(f"Item {ref_curta} — falha ao converter selo: {_e}")
+                    if _lo_indisponivel:
+                        avisos.append(f"Item {ref_curta}: LibreOffice indisponível — selo não gerado.")
+                    else:
+                        _erros_conv = []
+                        selo_png = selo_docx_para_png(_selo_docx, soffice, coletar_erro=_erros_conv)
+                        if not selo_png and _erros_conv:
+                            _lo_indisponivel = any(
+                                any(w in e.lower() for w in ('timeout', 'timed out', 'travou', 'não encontrado', 'not found', 'crashed', 'falhou'))
+                                for e in _erros_conv
+                            )
+                            for _e in _erros_conv:
+                                avisos.append(f"Item {ref_curta} — falha ao converter selo: {_e}")
+                            if _lo_indisponivel:
+                                avisos.append("⚠️ LibreOffice parece indisponível — conversão de selos cancelada para os demais itens para evitar travamento.")
                 else:
                     avisos.append(f"Item {ref_curta}: não consegui gravar o registro no modelo de selo.")
             _cache_selo[_chave_selo] = selo_png
