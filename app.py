@@ -12901,6 +12901,19 @@ if _is_active("etiquetas"):
                                         tem_bateria_png = True
                                         tem_pilha = True
 
+                                    # Código de barras PNG (gerado diretamente como PNG,
+                                    # não passando por EMF/LibreOffice)
+                                    if _ext == 'png' and w >= 100 and h >= 30:
+                                        try:
+                                            from pyzbar.pyzbar import decode as _decode_bc2
+                                            _bcs = _decode_bc2(_img)
+                                            for _bc2 in _bcs:
+                                                _num2 = _bc2.data.decode('utf-8', errors='ignore').strip()
+                                                if _num2 and _num2 not in codigos_barras_lidos:
+                                                    codigos_barras_lidos.append(_num2)
+                                        except Exception:
+                                            pass
+
                                     # Selo "Segurança/REGISTRO/Compulsório" -> imagem maior,
                                     # tenta OCR pra extrair o número do registro
                                     if registro is None and w > 120 and h > 80 and _ocr_disponivel:
