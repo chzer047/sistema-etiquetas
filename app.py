@@ -12839,7 +12839,7 @@ if _is_active("etiquetas"):
                 registro = f"{_reg_num}/{m.group(2)}" if m else None
 
                 # Indicativo
-                m = _re.search(r'PARTIR DE\s+\+?(\d+)\s+(ANOS?|MESES?)', texto, _re.IGNORECASE)
+                m = _re.search(r'PARTIR DE\s+\+?(\d+)\s*(?:\([^)]+\)\s*)?(ANOS?|MESES?)', texto, _re.IGNORECASE)
                 indicativo = f"{m.group(1)} {m.group(2).upper()}" if m else None
 
                 # Restritivo
@@ -13341,7 +13341,7 @@ if _is_active("etiquetas"):
 
                                 if _fix_ind:
                                     _txt_novo = _re.sub(
-                                        r'PARTIR DE\s+\+?\d+\s+(?:ANOS?|MESES?)',
+                                        r'PARTIR DE\s+\+?\d+\s*(?:\([^)]+\)\s*)?(?:ANOS?|MESES?)',
                                         f'PARTIR DE {_fix_ind}',
                                         _txt_novo, flags=_re.IGNORECASE
                                     )
