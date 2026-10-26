@@ -13413,16 +13413,24 @@ if _is_active("etiquetas"):
                 # 2. Indicativo de idade
                 ind_excel, rest_excel = _extrair_idade_nome(item_excel.get('nome', ''))
                 if etiq.get('indicativo') and ind_excel:
-                    etiq_ind = etiq['indicativo'].upper().replace('ANOS', 'ANO').strip()
-                    exc_ind = ind_excel.upper().replace('ANOS', 'ANO').strip()
-                    if etiq_ind == exc_ind or etiq['indicativo'].split()[0] == ind_excel.split()[0]:
+                    def _norm_idade(s):
+                        import re as _re2
+                        m2 = _re2.match(r'(\d+)\s*(ANOS?|MESES?)', s.upper().strip())
+                        if m2:
+                            return (int(m2.group(1)), 'MES' if 'MES' in m2.group(2) else 'ANO')
+                        return (None, None)
+                    etiq_num, etiq_unid = _norm_idade(etiq['indicativo'])
+                    exc_num, exc_unid = _norm_idade(ind_excel)
+                    if etiq_num is not None and etiq_num == exc_num and etiq_unid == exc_unid:
                         ok.append(f"Indicativo +{ind_excel} ✅")
                     else:
                         erros.append(f"Indicativo: etiqueta='+{etiq['indicativo']}' | nome='+{ind_excel}'")
 
                 # 3. Restritivo
                 if etiq.get('restritivo') and rest_excel:
-                    if etiq['restritivo'].split()[0] == rest_excel.split()[0]:
+                    rest_num_etiq, rest_unid_etiq = _norm_idade(etiq['restritivo'])
+                    rest_num_exc, rest_unid_exc = _norm_idade(rest_excel)
+                    if rest_num_etiq is not None and rest_num_etiq == rest_num_exc and rest_unid_etiq == rest_unid_exc:
                         ok.append(f"Restritivo -{rest_excel} ✅")
                     else:
                         erros.append(f"Restritivo: etiqueta='-{etiq['restritivo']}' | nome='-{rest_excel}'")
