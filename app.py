@@ -4183,7 +4183,7 @@ def _listener_uno_respondendo(porta=_LO_LISTENER_PORTA, timeout=1.0):
 
 
 @st.cache_resource(show_spinner=False)
-_suporte_uno_cache: dict = {}  # cache global: soffice_path -> resultado
+_suporte_uno_cache = {}  # cache global: soffice_path -> resultado
 
 def _verificar_suporte_uno(_soffice_path):
     """Testa se o Python embutido no LibreOffice consegue importar o módulo
