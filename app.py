@@ -4300,7 +4300,7 @@ def _converter_via_uno_listener(entrada_path, saida_path, filtro_nome, soffice_p
         try:
             _res = _spw.run(
                 [_suporte["python_lo"], _script, entrada_path, saida_path, filtro_nome],
-                capture_output=True, timeout=60, text=True
+                capture_output=True, timeout=20, text=True
             )
             _registrar(f"Conversão via listener: código={_res.returncode} | "
                        f"stdout='{(_res.stdout or '').strip()[:100]}' | "
@@ -4403,7 +4403,7 @@ def _selo_docx_para_png_metodo_antigo(selo_docx_bytes, soffice_path, coletar_err
              "--nofirststartwizard", "--nodefault", "--nolockcheck",
              f"-env:UserInstallation={_perfil}",
              "--convert-to", "png", "--outdir", _base, _docx_path],
-            capture_output=True, timeout=45, env=_env
+            capture_output=True, timeout=15, env=_env
         )
         _pngs = _glob.glob(_os.path.join(_base, "*.png"))
         return _res, _pngs, _base
