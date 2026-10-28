@@ -13918,6 +13918,12 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                                 if 'MENOR' not in _c and 'PARTE' not in _c:
                                                     _default_idx = 1 + _oi
                                                     break
+                                        elif _cat == 'ADVERTÊNCIA' and _tipo == 'padrao':
+                                            # ADVERTÊNCIA patinete/bike só aparece se o produto for de mobilidade
+                                            _nome_up = _item.get('nome', '').upper()
+                                            _kw_adv = ('PATINETE', 'PATINETA', 'BIKE', 'BICICLETA', 'BICICLET',
+                                                        'SKATE', 'SKBOARD', 'TROTINETE', 'HOVERBOARD', 'MONOCICLO')
+                                            _default_idx = 1 if any(k in _nome_up for k in _kw_adv) and len(_opcoes) > 1 else 0
                                         else:
                                             _default_idx = 1 if len(_opcoes) > 1 else 0
                                         st.selectbox(_cat.title(), _opcoes,
