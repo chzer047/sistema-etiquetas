@@ -4183,18 +4183,24 @@ def _listener_uno_respondendo(porta=_LO_LISTENER_PORTA, timeout=1.0):
 
 
 @st.cache_resource(show_spinner=False)
+_suporte_uno_cache: dict = {}  # cache global: soffice_path -> resultado
+
 def _verificar_suporte_uno(_soffice_path):
     """Testa se o Python embutido no LibreOffice consegue importar o módulo
     'uno'. Se não conseguir, o listener persistente não é viável nesta
     instalação e o sistema deve usar o método antigo (fallback).
 
-    Faz 2 tentativas antes de "desistir" e guardar um resultado negativo —
-    evita que um problema passageiro (ex: sistema ocupado num instante) vire
-    uma crença fixa e errada de 'não suportado' pelo resto da sessão."""
+    Resultado fica em cache global — o teste é feito apenas uma vez por caminho
+    do soffice, evitando que cada item da geração pague 20-40s de overhead."""
+    if _soffice_path in _suporte_uno_cache:
+        return _suporte_uno_cache[_soffice_path]
+
     import subprocess as _spw, time as _timeuno
     _python_lo = _python_bundled_libreoffice(_soffice_path)
     if not _python_lo:
-        return {"suportado": False, "motivo": "python.exe do LibreOffice não encontrado", "python_lo": None}
+        _r = {"suportado": False, "motivo": "python.exe do LibreOffice não encontrado", "python_lo": None}
+        _suporte_uno_cache[_soffice_path] = _r
+        return _r
 
     _ultimo_erro = None
     for _tentativa in range(2):
@@ -4202,14 +4208,18 @@ def _verificar_suporte_uno(_soffice_path):
             _res = _spw.run([_python_lo, "-c", "import uno; print('OK')"],
                              capture_output=True, timeout=20, text=True)
             if _res.returncode == 0 and "OK" in (_res.stdout or ""):
-                return {"suportado": True, "motivo": None, "python_lo": _python_lo}
+                _r = {"suportado": True, "motivo": None, "python_lo": _python_lo}
+                _suporte_uno_cache[_soffice_path] = _r
+                return _r
             _ultimo_erro = f"módulo uno não importou (código {_res.returncode}): {_res.stderr[:200]}"
         except Exception as _e:
             _ultimo_erro = f"erro ao testar: {_e}"
         if _tentativa == 0:
             _timeuno.sleep(1.5)  # espera antes de tentar de novo
 
-    return {"suportado": False, "motivo": _ultimo_erro, "python_lo": _python_lo}
+    _r = {"suportado": False, "motivo": _ultimo_erro, "python_lo": _python_lo}
+    _suporte_uno_cache[_soffice_path] = _r
+    return _r
 
 
 def _iniciar_listener_libreoffice(soffice_path, porta=_LO_LISTENER_PORTA, timeout_inicio=15):
@@ -5833,7 +5843,9 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
             textos_por_chave[(_row['tipo'], _row['categoria'], _row['titulo'])] = _row['conteudo']
 
     _cache_selo = {}
-    _lo_indisponivel = False  # True após primeiro timeout do LibreOffice — pula os seguintes
+    # Persiste entre gerações: se LibreOffice falhou na última, não tenta de novo
+    import streamlit as _st_lo
+    _lo_indisponivel = _st_lo.session_state.get('_lo_indisponivel', False)
 
     doc = _Doc()
     for section in doc.sections:
@@ -5895,6 +5907,9 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
                     else:
                         _erros_conv = []
                         selo_png = selo_docx_para_png(_selo_docx, soffice, coletar_erro=_erros_conv)
+                        if selo_png:
+                            # Conversão bem-sucedida — confirma que LO está operacional
+                            _st_lo.session_state.pop('_lo_indisponivel', None)
                         if not selo_png and _erros_conv:
                             _lo_indisponivel = any(
                                 any(w in e.lower() for w in ('timeout', 'timed out', 'travou', 'não encontrado', 'not found', 'crashed', 'falhou'))
@@ -5903,6 +5918,7 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
                             for _e in _erros_conv:
                                 avisos.append(f"Item {ref_curta} — falha ao converter selo: {_e}")
                             if _lo_indisponivel:
+                                _st_lo.session_state['_lo_indisponivel'] = True
                                 avisos.append("⚠️ LibreOffice parece indisponível — conversão de selos cancelada para os demais itens para evitar travamento.")
                 else:
                     avisos.append(f"Item {ref_curta}: não consegui gravar o registro no modelo de selo.")
