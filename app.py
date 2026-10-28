@@ -4182,9 +4182,10 @@ def _listener_uno_respondendo(porta=_LO_LISTENER_PORTA, timeout=1.0):
         return False
 
 
-@st.cache_resource(show_spinner=False)
 _suporte_uno_cache = {}  # cache global: soffice_path -> resultado
 
+
+@st.cache_resource(show_spinner=False)
 def _verificar_suporte_uno(_soffice_path):
     """Testa se o Python embutido no LibreOffice consegue importar o módulo
     'uno'. Se não conseguir, o listener persistente não é viável nesta
