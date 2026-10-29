@@ -5997,6 +5997,165 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
     return {'docx': docx_bytes, 'avisos': avisos}
 
 
+def _gerar_lote_rotulagem(itens_config, origem, solicitante_cnpj, data_fab, lote,
+                          cliente_base_registro, chorao_png_bytes=None, pilha_png_bytes=None,
+                          chorao18_png_bytes=None):
+    """Gera o Word de rotulagem. Cada item em itens_config deve ter um campo 'cliente' com os dados do importador."""
+    from docx import Document as _Doc
+    from docx.shared import Cm as _Cm, Pt as _Pt
+    from io import BytesIO as _Bio
+
+    avisos = []
+    soffice = _localizar_soffice()
+    import os as _os_diag
+    _soffice_existe = (soffice == "soffice") or _os_diag.path.exists(soffice)
+    if not _soffice_existe:
+        avisos.append(f"⚠️ LibreOffice NÃO encontrado em '{soffice}'. Os selos podem não ser gerados.")
+
+    _df_txt = listar_textos_etiqueta()
+    textos_por_chave = {}
+    if not _df_txt.empty:
+        for _, _row in _df_txt.iterrows():
+            textos_por_chave[(_row['tipo'], _row['categoria'], _row['titulo'])] = _row['conteudo']
+
+    _cache_selo = {}
+    import streamlit as _st_lo
+    _lo_indisponivel = _st_lo.session_state.get('_lo_indisponivel', False)
+
+    doc = _Doc()
+    for section in doc.sections:
+        section.top_margin = _Cm(2.5)
+        section.bottom_margin = _Cm(2.5)
+        section.left_margin = _Cm(3.0)
+        section.right_margin = _Cm(3.0)
+
+    for idx, cfg in enumerate(itens_config):
+        item = cfg['item']
+        cliente = cfg['cliente']
+        ref_curta, nome_curto = separar_referencia_nome(item['referencia_full'])
+
+        idade_fmt = formatar_idade(cfg['idade_num'], cfg['idade_uni']) if cfg.get('idade_num') else None
+        qtd_fmt = formatar_quantidade(cfg.get('pecas', 1)) or "1 Unidade"
+
+        registro_excel = re.sub(r'\s', '', item.get('registro', '') or '')
+        registro_base = buscar_registro_por_fabrica_familia(
+            cliente_base_registro, item.get('fabrica', ''), item.get('familia', '')
+        )
+        registro_base = re.sub(r'\s', '', registro_base or '')
+
+        if registro_base:
+            registro = registro_base
+            if registro_excel and registro_base != registro_excel:
+                avisos.append(
+                    f"⚠️ Item {ref_curta}: registro da base ({registro_base}) ≠ Excel ({registro_excel}). Usei o da base."
+                )
+        else:
+            registro = registro_excel
+            avisos.append(
+                f"⚠️ Item {ref_curta}: sem registro na base para Fábrica '{item.get('fabrica','?')}' "
+                f"+ Família '{item.get('familia','?')}' (cliente base '{cliente_base_registro}'). "
+                f"Usei o do Excel ({registro_excel or 'vazio'})."
+            )
+
+        _chave_selo = (cfg['variante'], registro)
+        selo_png = _cache_selo.get(_chave_selo)
+        if selo_png is None:
+            _modelo_existe = buscar_modelo_selo(cfg['variante'])
+            if not _modelo_existe:
+                avisos.append(f"Item {ref_curta}: modelo de selo '{cfg['variante']}' não cadastrado.")
+            elif not registro:
+                avisos.append(f"Item {ref_curta}: sem número de registro para o selo.")
+            else:
+                _selo_docx = gerar_selo_com_registro(cfg['variante'], registro)
+                if _selo_docx:
+                    if _lo_indisponivel:
+                        avisos.append(f"Item {ref_curta}: LibreOffice indisponível — selo não gerado.")
+                    else:
+                        _erros_conv = []
+                        selo_png = selo_docx_para_png(_selo_docx, soffice, coletar_erro=_erros_conv)
+                        if selo_png:
+                            _st_lo.session_state.pop('_lo_indisponivel', None)
+                        if not selo_png and _erros_conv:
+                            _lo_indisponivel = any(
+                                any(w in e.lower() for w in ('timeout', 'timed out', 'travou', 'não encontrado', 'not found', 'crashed', 'falhou'))
+                                for e in _erros_conv
+                            )
+                            for _e in _erros_conv:
+                                avisos.append(f"Item {ref_curta} — falha ao converter selo: {_e}")
+                            if _lo_indisponivel:
+                                _st_lo.session_state['_lo_indisponivel'] = True
+                                avisos.append("⚠️ LibreOffice parece indisponível — conversão cancelada.")
+                else:
+                    avisos.append(f"Item {ref_curta}: não consegui gravar o registro no modelo de selo.")
+            _cache_selo[_chave_selo] = selo_png
+        if not selo_png:
+            avisos.append(f"Item {ref_curta}: selo '{cfg['variante']}' não gerado.")
+
+        barcode_png, aviso_bc = gerar_codigo_barras_ean13(item.get('codigo_barras', ''))
+        if aviso_bc:
+            avisos.append(f"Item {ref_curta}: {aviso_bc}")
+
+        _tem_corda = bool(item.get('corda', False))
+        _tipo_chorao = detectar_chorao_18m(item.get('nome', ''), tem_corda=_tem_corda)
+        if _tipo_chorao == 'chorao18':
+            chorao_para_esse = chorao18_png_bytes
+        elif cfg.get('idade_uni') == "ANOS":
+            chorao_para_esse = chorao_png_bytes
+        else:
+            chorao_para_esse = None
+
+        textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave)
+
+        dados = {
+            'solicitante_cnpj': solicitante_cnpj or None,
+            'importador_razao': cliente['razao_social'],
+            'importador_endereco': cliente['endereco'],
+            'importador_cnpj': cliente['cnpj'],
+            'origem': origem,
+            'quantidade': qtd_fmt,
+            'data_fabricacao': data_fab,
+            'lote': lote,
+            'sac': cliente['sac'],
+            'referencia': ref_curta,
+            'nome_curto': nome_curto,
+            'marca': item.get('marca', ''),
+            'textos_direita': textos_dir,
+            'tipo': cfg['tipo'],
+        }
+
+        _montar_etiqueta_no_doc(
+            doc, dados, selo_png, barcode_png,
+            chorao_png=chorao_para_esse,
+            pilha_png=pilha_png_bytes if cfg['tipo'] == "pilha" else None,
+            variante_selo=cfg['variante'],
+            pilha_pos_h_cm=cfg.get('pilha_pos_h', 1.767),
+            pilha_pos_v_cm=cfg.get('pilha_pos_v', 0.172),
+            pilha_largura_cm=cfg.get('pilha_largura_cm', 1.0),
+            pilha_altura_cm=cfg.get('pilha_altura_cm', 0.95),
+            logo_png=cfg.get('logo_png') if cfg.get('logo_ativo', False) else None,
+            logo_pos_h_cm=cfg.get('logo_pos_h', 0.5),
+            logo_pos_v_cm=cfg.get('logo_pos_v', 5.0),
+            logo_largura_cm=cfg.get('logo_largura_cm', 2.0),
+            logo_altura_cm=cfg.get('logo_altura_cm', 1.0),
+            larg_col_cm=cfg.get('larg_col_cm', 5.74),
+            altura_linha_cm=cfg.get('altura_linha_cm'),
+        )
+
+        if idx < len(itens_config) - 1:
+            if idx % 2 == 0:
+                p_sep = doc.add_paragraph()
+                p_sep.paragraph_format.space_after = _Pt(8)
+                p_sep.paragraph_format.space_before = _Pt(8)
+            else:
+                doc.add_page_break()
+
+    _buf_docx = _Bio()
+    doc.save(_buf_docx)
+    docx_bytes = _buf_docx.getvalue()
+
+    return {'docx': docx_bytes, 'avisos': avisos}
+
+
 # ---- Clientes (importadores) para geração de etiquetas ----
 
 def salvar_cliente_etiqueta(apelido, razao_social, cnpj, endereco, sac, origem, id_existente=None):
@@ -13700,8 +13859,9 @@ Esse módulo está sendo construído por etapas:
 Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração da etiqueta não tem imagem pra usar.
 """)
 
-    tab_gerar, tab_clientes, tab_logos, tab_selos, tab_textos, tab_genericos, tab_lista = st.tabs([
+    tab_gerar, tab_rotulagem, tab_clientes, tab_logos, tab_selos, tab_textos, tab_genericos, tab_lista = st.tabs([
         "🏭 Gerar etiquetas",
+        "🏷️ Rotulagem",
         "👤 Clientes (importadores)",
         "🎨 Logos de clientes",
         "📌 Modelos de selo",
@@ -14123,6 +14283,404 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             if _avisos_etiq:
                                 st.markdown("**Avisos:**")
                                 for _av in _avisos_etiq[:40]:
+                                    st.warning(_av)
+
+    with tab_rotulagem:
+        st.subheader("Rotulagem — etiquetas por solicitante")
+        st.caption("Igual ao 'Gerar etiquetas', mas cada item pode ter um cliente/solicitante diferente. Todos os itens vão num único Word.")
+
+        _clientes_disp_rot = listar_clientes_etiqueta()
+        if _clientes_disp_rot.empty:
+            st.warning("Nenhum cliente cadastrado. Cadastre um cliente na aba '👤 Clientes' antes de gerar.")
+        else:
+            with st.container(border=True):
+                st.markdown("##### 1️⃣ Dados gerais")
+                colg1, colg2 = st.columns(2)
+                with colg1:
+                    _rot_origem = st.text_input("Origem", value="CHINA", placeholder="Ex: CHINA, BRASIL, ALEMANHA", key="rot_origem")
+                with colg2:
+                    _rot_com_solicitante = st.radio("Tem solicitante?", ["Não", "Sim"], horizontal=True, key="rot_tem_solic")
+
+                _rot_solicitante_cnpj = ""
+                if _rot_com_solicitante == "Sim":
+                    _rot_solicitante_cnpj = st.text_input("CNPJ do solicitante", key="rot_solic_cnpj",
+                        help="Aparece quando um cliente empresta o registro para outro.")
+
+                st.markdown("**De onde puxar o número de registro?**")
+                colr1, colr2 = st.columns(2)
+                with colr1:
+                    _rot_sistema_reg = st.radio("Sistema", ["Sistema 5 Novo Projeto (Bolsa)", "Sistema 5 Próprios", "Sistema 5 Focus"],
+                        key="rot_sistema_reg")
+                with colr2:
+                    if _rot_sistema_reg == "Sistema 5 Novo Projeto (Bolsa)":
+                        _rot_cliente_base_reg = "BOLSA"
+                        st.info("Cliente base: **BOLSA**")
+                    elif _rot_sistema_reg == "Sistema 5 Focus":
+                        _rot_cliente_base_reg = "FOCUS"
+                        st.info("Cliente base: **FOCUS**")
+                    else:
+                        _rot_clientes_base_disp = listar_clientes_base_registros()
+                        if _rot_clientes_base_disp:
+                            _rot_cliente_base_reg = st.selectbox("Cliente (base de registros)", _rot_clientes_base_disp, key="rot_clientebase_reg")
+                        else:
+                            _rot_cliente_base_reg = ""
+                            st.warning("Nenhum cliente na base de Registros.")
+
+            with st.container(border=True):
+                st.markdown("##### 2️⃣ Dados do lote")
+                cold1, cold2 = st.columns(2)
+                with cold1:
+                    _rot_data_fab = st.text_input("Data de Fabricação", value="", placeholder="Ex: Julho/2026", key="rot_data_fab")
+                with cold2:
+                    _rot_lote = st.text_input("Lote", value="", placeholder="Ex: 202607", key="rot_lote")
+
+            with st.container(border=True):
+                st.markdown("##### 3️⃣ Excel (Packing List)")
+                _rot_excel = st.file_uploader("Enviar Excel do Packing List", type=["xls", "xlsx"], key="rot_excel_upload")
+
+            if _rot_excel is not None:
+                from openpyxl import load_workbook as _lwb_rot
+
+                def _carregar_itens_excel_rotulagem(_file_bytes, _nome):
+                    import tempfile as _tmp_rot, os as _os_rot, subprocess as _sub_rot, glob as _glob_rot
+                    _dir = _tmp_rot.mkdtemp()
+                    _path = _os_rot.path.join(_dir, _nome)
+                    with open(_path, "wb") as f:
+                        f.write(_file_bytes)
+                    if _nome.lower().endswith(".xls"):
+                        _sp = _localizar_soffice()
+                        try:
+                            _sub_rot.run([_sp, "--headless", "--convert-to", "xlsx", "--outdir", _dir, _path,
+                                          f"-env:UserInstallation=file://{_dir}/lo"], capture_output=True, timeout=90)
+                            _xlsxs = _glob_rot.glob(_os_rot.path.join(_dir, "*.xlsx"))
+                            if _xlsxs:
+                                _path = _xlsxs[0]
+                        except Exception:
+                            pass
+                    _wb = _lwb_rot(_path, data_only=True)
+                    _ws = _wb.active
+                    _CORES_HDR = ("00CCFF", "00B0F0")
+                    _idx = None
+                    for _i, _linha in enumerate(_ws.iter_rows(min_row=1, max_row=min(30, _ws.max_row))):
+                        for _cel in _linha:
+                            _rgb = getattr(getattr(_cel.fill, 'fgColor', None), 'rgb', None) if _cel.fill else None
+                            if _rgb and any(c in str(_rgb).upper() for c in _CORES_HDR):
+                                _idx = _i; break
+                        if _idx is not None: break
+                    _rows = list(_ws.iter_rows(values_only=True))
+                    if _idx is None:
+                        for _i, _r in enumerate(_rows[:30]):
+                            if any("REFERENCIA" in str(c).upper() for c in _r if c):
+                                _idx = _i; break
+                    if _idx is None:
+                        return None
+                    _headers = [str(h).strip() if h else "" for h in _rows[_idx]]
+                    def _ci(nome):
+                        for _j, _h in enumerate(_headers):
+                            if nome in _h.upper(): return _j
+                        return None
+                    _cols = {k: _ci(k) for k in ['REFERENCIA','MARCA','CÓDIGO DE BARRAS','NOME','FABRICA','FAMILIA','REGISTRO','QTD','CORDA']}
+                    _itens = []
+                    for _r in _rows[_idx+1:]:
+                        _ref = _r[_cols['REFERENCIA']] if _cols['REFERENCIA'] is not None else None
+                        if not _ref or str(_ref).strip().upper() in ("REFERENCIA", ""):
+                            continue
+                        def _get(col):
+                            _ci_ = _cols.get(col)
+                            if _ci_ is None or _ci_ >= len(_r): return ""
+                            _v = _r[_ci_]
+                            return str(_v).strip() if _v is not None else ""
+                        _corda_val = _get('CORDA').upper()
+                        _tem_corda = _corda_val in ('X', 'S', 'SIM', '1', 'TRUE', 'Y', 'YES')
+                        _itens.append({
+                            'referencia_full': _get('REFERENCIA'),
+                            'marca': _get('MARCA'),
+                            'codigo_barras': _get('CÓDIGO DE BARRAS'),
+                            'nome': _get('NOME'),
+                            'fabrica': _get('FABRICA'),
+                            'familia': _get('FAMILIA'),
+                            'registro': _get('REGISTRO'),
+                            'qtd': _get('QTD'),
+                            'corda': _tem_corda,
+                        })
+                    return _itens
+
+                _rot_excel.seek(0)
+                _itens_lidos_rot = _carregar_itens_excel_rotulagem(_rot_excel.read(), _rot_excel.name)
+
+                if not _itens_lidos_rot:
+                    st.error("Não consegui identificar os itens no Excel.")
+                else:
+                    st.success(f"✅ {len(_itens_lidos_rot)} itens identificados no Excel.")
+                    _rot_cli_opcoes = _clientes_disp_rot["apelido"].tolist()
+
+                    with st.container(border=True):
+                        st.markdown("##### 4️⃣ Configurar cada item")
+                        st.caption("Para cada item: escolha o cliente/solicitante, o tipo, a variante de selo e a quantidade.")
+
+                        _TIPOS_ETIQUETA_ROT = {
+                            "padrao": "Padrão",
+                            "pilha": "C/ Pilha",
+                            "maquiagem": "Maquiagem",
+                            "massa": "Massa de Modelar",
+                        }
+                        _VARIANTES_ROT = list(_VARIANTES_SELO_VALIDAS.keys())
+                        _df_textos_todos_rot = listar_textos_etiqueta()
+                        _NENHUM_TEXTO_ROT = "— nenhum —"
+
+                        for _i, _item in enumerate(_itens_lidos_rot):
+                            _ref_curta, _nome_curto = separar_referencia_nome(_item['referencia_full'])
+                            _idade_det = detectar_idade_do_nome(_item['nome'])
+                            _tem_pilha_det = detectar_tem_pilha_do_nome(_item['nome'])
+                            _tipo_sugerido = "pilha" if _tem_pilha_det else "padrao"
+                            _is_18m = bool(re.search(r'\+\s*18\s*M[EÊ]S', str(_item.get('nome', '')).upper()))
+
+                            with st.expander(f"{_ref_curta} — {_nome_curto[:50]}", expanded=(_i < 3)):
+                                _rot_cli_item = st.selectbox("🏢 Cliente/Solicitante", _rot_cli_opcoes, key=f"rot_cli_{_i}")
+                                _logo_bytes_rot_cur, _, _, _ = buscar_logo_cliente(_rot_cli_item)
+                                _cli_prev_data_rot = buscar_cliente_etiqueta(_rot_cli_item)
+
+                                cc1, cc2, cc3, cc4 = st.columns(4)
+                                with cc1:
+                                    _rot_tipo = st.selectbox("Tipo", list(_TIPOS_ETIQUETA_ROT.keys()),
+                                        format_func=lambda t: _TIPOS_ETIQUETA_ROT[t],
+                                        index=list(_TIPOS_ETIQUETA_ROT.keys()).index(_tipo_sugerido),
+                                        key=f"rot_tipo_{_i}")
+                                with cc2:
+                                    _rot_variante = st.selectbox("Selo", _VARIANTES_ROT,
+                                        format_func=lambda v: _VARIANTES_SELO_VALIDAS[v], key=f"rot_variante_{_i}")
+                                with cc3:
+                                    _rot_qtd_excel = _item.get('qtd', '')
+                                    try:
+                                        _rot_pecas_default = max(1, int(float(_rot_qtd_excel))) if _rot_qtd_excel else 1
+                                    except (ValueError, TypeError):
+                                        _rot_pecas_default = 1
+                                    _rot_pecas = st.number_input("Peças", min_value=1, value=_rot_pecas_default, step=1, key=f"rot_pecas_{_i}")
+                                with cc4:
+                                    _rot_idade_num = st.number_input("Idade (nº)", min_value=0,
+                                        value=(_idade_det['numero'] if _idade_det else 3), step=1, key=f"rot_idadenum_{_i}")
+                                    _rot_idade_uni = st.selectbox("Unidade", ["ANOS", "MESES"],
+                                        index=(0 if not _idade_det or _idade_det['unidade']=="ANOS" else 1), key=f"rot_idadeuni_{_i}")
+                                st.caption(f"Registro (do Excel): {_item['registro'] or '(vazio)'} | Código: {_item['codigo_barras'] or '(vazio)'}")
+
+                                st.markdown("**Textos da etiqueta (ATENÇÃO/INDICAÇÃO/etc):**")
+                                _categorias_rot = CATEGORIAS_POR_TIPO_ETIQUETA.get(_rot_tipo, [])
+                                _cols_txt_rot = st.columns(len(_categorias_rot)) if _categorias_rot else []
+                                for _cat, _col_txt in zip(_categorias_rot, _cols_txt_rot):
+                                    with _col_txt:
+                                        if not _df_textos_todos_rot.empty:
+                                            _opcoes_df = _df_textos_todos_rot[
+                                                (_df_textos_todos_rot['tipo'] == _rot_tipo) & (_df_textos_todos_rot['categoria'] == _cat)
+                                            ]
+                                        else:
+                                            _opcoes_df = _df_textos_todos_rot
+                                        _opcoes = [_NENHUM_TEXTO_ROT] + list(_opcoes_df['titulo'])
+                                        _aten_18m_sem_pilha = (_cat == 'ATENÇÃO' and _is_18m and not _tem_pilha_det)
+                                        _aten_18m_com_pilha = (_cat == 'ATENÇÃO' and _is_18m and _tem_pilha_det)
+                                        if _aten_18m_sem_pilha:
+                                            _default_idx = 0
+                                        elif _aten_18m_com_pilha and not _opcoes_df.empty:
+                                            _default_idx = 1 if len(_opcoes) > 1 else 0
+                                            for _oi, (_, _or) in enumerate(_opcoes_df.iterrows()):
+                                                _c = str(_or.get('conteudo', '')).upper()
+                                                if 'MENOR' not in _c and 'PARTE' not in _c:
+                                                    _default_idx = 1 + _oi
+                                                    break
+                                        elif _cat == 'ADVERTÊNCIA' and _rot_tipo == 'padrao':
+                                            _nome_up = _item.get('nome', '').upper()
+                                            _kw_adv = ('PATINETE', 'PATINETA', 'BIKE', 'BICICLETA', 'BICICLET',
+                                                        'SKATE', 'SKBOARD', 'TROTINETE', 'HOVERBOARD', 'MONOCICLO')
+                                            _default_idx = 1 if any(k in _nome_up for k in _kw_adv) and len(_opcoes) > 1 else 0
+                                        else:
+                                            _default_idx = 1 if len(_opcoes) > 1 else 0
+                                        st.selectbox(_cat.title(), _opcoes,
+                                            index=_default_idx,
+                                            key=f"rot_txt_{_i}_{_cat}")
+                                        if _aten_18m_sem_pilha:
+                                            st.caption("ℹ️ +18m sem pilha: ATENÇÃO deixada em branco automaticamente.")
+                                        elif _aten_18m_com_pilha:
+                                            st.caption("ℹ️ +18m com pilha: selecionado texto de montagem por adulto.")
+                                if not _categorias_rot:
+                                    st.caption("Esse tipo não usa textos de ATENÇÃO/INDICAÇÃO configuráveis.")
+
+                                import streamlit.components.v1 as _stc_rot
+                                import base64 as _b64_rot
+                                _textos_dir_rot_prev = []
+                                for _cat_pp in _categorias_rot:
+                                    _titulo_pp = st.session_state.get(f"rot_txt_{_i}_{_cat_pp}", "")
+                                    if _titulo_pp and _titulo_pp != _NENHUM_TEXTO_ROT and not _df_textos_todos_rot.empty:
+                                        _m_pp = _df_textos_todos_rot[
+                                            (_df_textos_todos_rot['tipo'] == _rot_tipo) &
+                                            (_df_textos_todos_rot['categoria'] == _cat_pp) &
+                                            (_df_textos_todos_rot['titulo'] == _titulo_pp)
+                                        ]
+                                        if not _m_pp.empty:
+                                            _textos_dir_rot_prev.append((_cat_pp, str(_m_pp.iloc[0]['conteudo'])))
+                                _tem_corda_rot = bool(_item.get('corda', False))
+                                _tipo_chorao_rot = detectar_chorao_18m(_item.get('nome', ''), tem_corda=_tem_corda_rot)
+                                _rot_idade_uni_cur = st.session_state.get(f"rot_idadeuni_{_i}", 'ANOS')
+                                _tem_chorao_rot = bool(_tipo_chorao_rot == 'chorao18' or _rot_idade_uni_cur == 'ANOS')
+
+                                _br_rot = _etiq_bridge_comp(idx=_i, key=f"rot_etiq_bridge_{_i}", default=None)
+                                _lbk_rot = f"_rot_last_bridge_{_i}"
+                                if _br_rot is not None:
+                                    try:
+                                        import json as _json_rot
+                                        _bpos = _br_rot if isinstance(_br_rot, dict) else _json_rot.loads(str(_br_rot))
+                                        _br_str = _json_rot.dumps(_bpos, sort_keys=True)
+                                        if _br_str != st.session_state.get(_lbk_rot, ""):
+                                            st.session_state[_lbk_rot] = _br_str
+                                            _clamp = lambda v, mn, mx: max(mn, min(mx, float(v)))
+                                            if 'logo_h'   in _bpos: st.session_state[f"rot_logo_pos_h_{_i}"] = _clamp(_bpos['logo_h'],   0.0, 12.0)
+                                            if 'logo_v'   in _bpos: st.session_state[f"rot_logo_pos_v_{_i}"] = _clamp(_bpos['logo_v'],   0.0, 15.0)
+                                            if 'logo_w'   in _bpos: st.session_state[f"rot_logo_w_{_i}"]     = _clamp(_bpos['logo_w'],   0.5, 11.0)
+                                            if 'logo_hh'  in _bpos: st.session_state[f"rot_logo_hh_{_i}"]    = _clamp(_bpos['logo_hh'],  0.3,  8.0)
+                                            if 'pilha_h'  in _bpos: st.session_state[f"rot_pilha_pos_h_{_i}"]= _clamp(_bpos['pilha_h'],  0.0, 10.0)
+                                            if 'pilha_v'  in _bpos: st.session_state[f"rot_pilha_pos_v_{_i}"]= _clamp(_bpos['pilha_v'], -2.0,  5.0)
+                                            if 'pilha_w'  in _bpos: st.session_state[f"rot_pilha_w_{_i}"]    = _clamp(_bpos['pilha_w'],  0.3,  4.0)
+                                            if 'pilha_hh' in _bpos: st.session_state[f"rot_pilha_hh_{_i}"]   = _clamp(_bpos['pilha_hh'], 0.3,  4.0)
+                                            if 'label_w'  in _bpos: st.session_state[f"rot_label_w_{_i}"]    = _clamp(_bpos['label_w'],  5.0, 30.0)
+                                            if 'label_h'  in _bpos: st.session_state[f"rot_label_h_{_i}"]    = _clamp(_bpos['label_h'],  2.0, 20.0)
+                                    except Exception:
+                                        pass
+
+                                st.markdown("**📐 Dimensões da etiqueta:**")
+                                _dc1, _dc2 = st.columns(2)
+                                with _dc1:
+                                    st.caption("Largura total (cm)")
+                                    _rot_label_w = st.number_input(f"lw_rot_{_i}", 5.0, 30.0, 11.48, 0.1, key=f"rot_label_w_{_i}", format="%.2f", label_visibility="collapsed")
+                                with _dc2:
+                                    st.caption("Altura (cm)")
+                                    _rot_label_h = st.number_input(f"lh_rot_{_i}", 2.0, 20.0, 5.74, 0.1, key=f"rot_label_h_{_i}", format="%.2f", label_visibility="collapsed")
+
+                                _rot_pilha_b64 = None
+                                if _tem_pilha_det:
+                                    st.markdown("**📍 Posição e tamanho da imagem de pilha:**")
+                                    _pc1, _pc2 = st.columns(2)
+                                    with _pc1:
+                                        st.caption("H (cm, esquerda)  ·  V (cm, ADVERTÊNCIA)")
+                                        _rot_pp_h = st.number_input(f"ph_rot_{_i}", 0.0, 10.0, 1.767, 0.05, key=f"rot_pilha_pos_h_{_i}", format="%.2f", label_visibility="collapsed")
+                                        _rot_pp_v = st.number_input(f"pv_rot_{_i}", -2.0, 5.0, 0.172, 0.05, key=f"rot_pilha_pos_v_{_i}", format="%.2f", label_visibility="collapsed")
+                                    with _pc2:
+                                        st.caption("Largura (cm)  ·  Altura (cm)")
+                                        _rot_pp_w = st.number_input(f"pw_rot_{_i}", 0.3, 4.0, 1.0, 0.05, key=f"rot_pilha_w_{_i}", format="%.2f", label_visibility="collapsed")
+                                        _rot_pp_hh = st.number_input(f"phh_rot_{_i}", 0.3, 4.0, 0.95, 0.05, key=f"rot_pilha_hh_{_i}", format="%.2f", label_visibility="collapsed")
+                                    _rot_pilha_bytes_prev, _ = buscar_asset_generico("pilha")
+                                    _rot_pilha_b64 = _b64_rot.b64encode(_rot_pilha_bytes_prev).decode() if _rot_pilha_bytes_prev else None
+                                else:
+                                    _rot_pp_h, _rot_pp_v, _rot_pp_w, _rot_pp_hh = 1.767, 0.172, 1.0, 0.95
+
+                                _rot_usar_logo = False
+                                _rot_lh, _rot_lv, _rot_lw, _rot_lhh = 0.5, 5.0, 2.0, 1.0
+                                _rot_logo_b64_canvas = None
+                                if _logo_bytes_rot_cur:
+                                    st.markdown("**🎨 Logo do cliente:**")
+                                    _rot_usar_logo = st.checkbox("📌 Adicionar logo nesta etiqueta", value=False, key=f"rot_usar_logo_{_i}")
+                                    if _rot_usar_logo:
+                                        _rot_logo_b64_canvas = _b64_rot.b64encode(_logo_bytes_rot_cur).decode()
+                                        _lc1, _lc2 = st.columns(2)
+                                        with _lc1:
+                                            st.caption("H (cm, esquerda)  ·  V (cm, topo)")
+                                            _rot_lh = st.number_input(f"rlh_{_i}", 0.0, 12.0, 0.5, 0.05, key=f"rot_logo_pos_h_{_i}", format="%.2f", label_visibility="collapsed")
+                                            _rot_lv = st.number_input(f"rlv_{_i}", 0.0, 15.0, 5.0, 0.05, key=f"rot_logo_pos_v_{_i}", format="%.2f", label_visibility="collapsed")
+                                        with _lc2:
+                                            st.caption("Largura (cm)  ·  Altura (cm)")
+                                            _rot_lw = st.number_input(f"rlw_{_i}", 0.5, 11.0, 2.0, 0.05, key=f"rot_logo_w_{_i}", format="%.2f", label_visibility="collapsed")
+                                            _rot_lhh = st.number_input(f"rlhh_{_i}", 0.3, 8.0, 1.0, 0.05, key=f"rot_logo_hh_{_i}", format="%.2f", label_visibility="collapsed")
+
+                                st.caption("💡 Redimensione o canvas (alça no canto inferior direito) para ajustar a etiqueta. Arraste ⚡ pilha (laranja) ou 🏷 logo (azul) · alça no canto = redimensionar elemento.")
+                                _rot_canvas_html = _html_drag_etiqueta_canvas(
+                                    tipo_etiqueta=_rot_tipo,
+                                    pilha_b64=_rot_pilha_b64 if _tem_pilha_det else None,
+                                    pilha_h_cm=_rot_pp_h, pilha_v_cm=_rot_pp_v,
+                                    pilha_w_cm=_rot_pp_w, pilha_hh_cm=_rot_pp_hh,
+                                    logo_b64=_rot_logo_b64_canvas,
+                                    logo_h_cm=_rot_lh, logo_v_cm=_rot_lv,
+                                    logo_w_cm=_rot_lw, logo_hh_cm=_rot_lhh,
+                                    cliente_info=_cli_prev_data_rot,
+                                    item_nome=_nome_curto,
+                                    item_ref=_ref_curta,
+                                    item_qtd=str(_item.get('qtd', '')),
+                                    textos_dir=_textos_dir_rot_prev,
+                                    tem_chorao=_tem_chorao_rot,
+                                    item_idx=_i,
+                                    larg_cm=_rot_label_w,
+                                    alt_cm=_rot_label_h,
+                                )
+                                _stc_rot.html(_rot_canvas_html, height=max(520, int(_rot_label_h * 36) + 80))
+
+                    with st.container(border=True):
+                        st.markdown("##### 5️⃣ Gerar")
+                        if st.button("🏷️ Gerar rotulagem (Word)", type="primary", key="btn_gerar_rotulagem"):
+                            _itens_config_rot = []
+                            _algum_sem_cli = False
+                            for _i, _item in enumerate(_itens_lidos_rot):
+                                _rot_tipo_item = st.session_state.get(f"rot_tipo_{_i}", "padrao")
+                                _rot_titulos_texto = {}
+                                for _cat in CATEGORIAS_POR_TIPO_ETIQUETA.get(_rot_tipo_item, []):
+                                    _escolha = st.session_state.get(f"rot_txt_{_i}_{_cat}")
+                                    if _escolha and _escolha != "— nenhum —":
+                                        _rot_titulos_texto[_cat] = _escolha
+                                _rot_cli_ap = st.session_state.get(f"rot_cli_{_i}", _rot_cli_opcoes[0] if _rot_cli_opcoes else "")
+                                _cli_data_item = buscar_cliente_etiqueta(_rot_cli_ap)
+                                if not _cli_data_item:
+                                    st.error(f"Cliente '{_rot_cli_ap}' não encontrado para o item {_i+1}.")
+                                    _algum_sem_cli = True
+                                    break
+                                _rot_logo_bytes_item, _, _, _ = buscar_logo_cliente(_rot_cli_ap)
+                                _itens_config_rot.append({
+                                    'item': _item,
+                                    'cliente': _cli_data_item,
+                                    'tipo': _rot_tipo_item,
+                                    'variante': st.session_state.get(f"rot_variante_{_i}", _VARIANTES_ROT[0]),
+                                    'pecas': st.session_state.get(f"rot_pecas_{_i}", 1),
+                                    'idade_num': st.session_state.get(f"rot_idadenum_{_i}", 3),
+                                    'idade_uni': st.session_state.get(f"rot_idadeuni_{_i}", "ANOS"),
+                                    'titulos_texto': _rot_titulos_texto,
+                                    'pilha_pos_h': st.session_state.get(f"rot_pilha_pos_h_{_i}", 1.767),
+                                    'pilha_pos_v': st.session_state.get(f"rot_pilha_pos_v_{_i}", 0.172),
+                                    'pilha_largura_cm': st.session_state.get(f"rot_pilha_w_{_i}", 1.0),
+                                    'pilha_altura_cm': st.session_state.get(f"rot_pilha_hh_{_i}", 0.95),
+                                    'logo_ativo': st.session_state.get(f"rot_usar_logo_{_i}", False),
+                                    'logo_png': _rot_logo_bytes_item,
+                                    'logo_pos_h': st.session_state.get(f"rot_logo_pos_h_{_i}", 0.5),
+                                    'logo_pos_v': st.session_state.get(f"rot_logo_pos_v_{_i}", 5.0),
+                                    'logo_largura_cm': st.session_state.get(f"rot_logo_w_{_i}", 2.0),
+                                    'logo_altura_cm': st.session_state.get(f"rot_logo_hh_{_i}", 1.0),
+                                    'larg_col_cm': st.session_state.get(f"rot_label_w_{_i}", 11.48) / 2,
+                                    'altura_linha_cm': st.session_state.get(f"rot_label_h_{_i}", 5.74),
+                                })
+                            if not _algum_sem_cli:
+                                _rot_chorao_bytes, _ = buscar_asset_generico("chorao")
+                                _rot_pilha_bytes_gen, _ = buscar_asset_generico("pilha")
+                                _rot_chorao18_bytes, _ = buscar_asset_generico("chorao18")
+
+                                with st.spinner("Gerando rotulagem... (a conversão dos selos pode levar um tempo)"):
+                                    _rot_resultado = _gerar_lote_rotulagem(
+                                        _itens_config_rot, _rot_origem, _rot_solicitante_cnpj,
+                                        _rot_data_fab, _rot_lote, _rot_cliente_base_reg,
+                                        chorao_png_bytes=_rot_chorao_bytes, pilha_png_bytes=_rot_pilha_bytes_gen,
+                                        chorao18_png_bytes=_rot_chorao18_bytes
+                                    )
+                                if _rot_resultado and _rot_resultado.get('docx'):
+                                    st.session_state['rot_docx_bytes'] = _rot_resultado['docx']
+                                    st.session_state['rot_avisos'] = _rot_resultado.get('avisos', [])
+                                    st.success("✅ Rotulagem gerada! Clique em Baixar abaixo.")
+                                else:
+                                    st.session_state.pop('rot_docx_bytes', None)
+                                    st.error("Não foi possível gerar a rotulagem.")
+
+                        if st.session_state.get('rot_docx_bytes'):
+                            st.download_button("⬇️ Baixar Word (.docx)",
+                                st.session_state['rot_docx_bytes'],
+                                "rotulagem.docx",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="dl_rot_docx")
+                            st.caption("Pra ter em PDF: abra o Word e use 'Salvar como PDF'.")
+                            _rot_avisos = st.session_state.get('rot_avisos', [])
+                            if _rot_avisos:
+                                st.markdown("**Avisos:**")
+                                for _av in _rot_avisos[:40]:
                                     st.warning(_av)
 
     with tab_clientes:
