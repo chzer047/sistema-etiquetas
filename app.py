@@ -4772,7 +4772,15 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
             r = pp.add_run(texto); _fmt(r, tam, bold=bold_all)
         return pp
 
-    if dados.get('solicitante_cnpj'):
+    if dados.get('solicitante_razao'):
+        add_linha(cell_esq, "Solicitante da certificação:")
+        add_linha(cell_esq, dados['solicitante_razao'])
+        if dados.get('solicitante_endereco'):
+            add_linha(cell_esq, dados['solicitante_endereco'])
+        add_linha(cell_esq, f"CNPJ: {dados['solicitante_cnpj']}")
+        if dados.get('solicitante_sac'):
+            add_linha(cell_esq, f"SAC: {dados['solicitante_sac']}")
+    elif dados.get('solicitante_cnpj'):
         add_linha(cell_esq, "Solicitante da certificação:")
         add_linha(cell_esq, f"CNPJ: {dados['solicitante_cnpj']}")
     add_linha(cell_esq, dados['importador_razao'], bold_prefix="Importador: ")
@@ -5997,10 +6005,11 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
     return {'docx': docx_bytes, 'avisos': avisos}
 
 
-def _gerar_lote_rotulagem(itens_config, origem, solicitante_cnpj, data_fab, lote,
+def _gerar_lote_rotulagem(itens_config, importador, origem, data_fab, lote,
                           cliente_base_registro, chorao_png_bytes=None, pilha_png_bytes=None,
                           chorao18_png_bytes=None):
-    """Gera o Word de rotulagem. Cada item em itens_config deve ter um campo 'cliente' com os dados do importador."""
+    """Gera o Word de rotulagem. importador é fixo para todos os itens.
+    Cada item em itens_config deve ter um campo 'solicitante' com os dados completos do solicitante."""
     from docx import Document as _Doc
     from docx.shared import Cm as _Cm, Pt as _Pt
     from io import BytesIO as _Bio
@@ -6031,7 +6040,7 @@ def _gerar_lote_rotulagem(itens_config, origem, solicitante_cnpj, data_fab, lote
 
     for idx, cfg in enumerate(itens_config):
         item = cfg['item']
-        cliente = cfg['cliente']
+        solicitante = cfg['solicitante']
         ref_curta, nome_curto = separar_referencia_nome(item['referencia_full'])
 
         idade_fmt = formatar_idade(cfg['idade_num'], cfg['idade_uni']) if cfg.get('idade_num') else None
@@ -6107,15 +6116,18 @@ def _gerar_lote_rotulagem(itens_config, origem, solicitante_cnpj, data_fab, lote
         textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave)
 
         dados = {
-            'solicitante_cnpj': solicitante_cnpj or None,
-            'importador_razao': cliente['razao_social'],
-            'importador_endereco': cliente['endereco'],
-            'importador_cnpj': cliente['cnpj'],
+            'solicitante_razao': solicitante['razao_social'],
+            'solicitante_endereco': solicitante['endereco'],
+            'solicitante_cnpj': solicitante['cnpj'],
+            'solicitante_sac': solicitante['sac'],
+            'importador_razao': importador['razao_social'],
+            'importador_endereco': importador['endereco'],
+            'importador_cnpj': importador['cnpj'],
             'origem': origem,
             'quantidade': qtd_fmt,
             'data_fabricacao': data_fab,
             'lote': lote,
-            'sac': cliente['sac'],
+            'sac': importador['sac'],
             'referencia': ref_curta,
             'nome_curto': nome_curto,
             'marca': item.get('marca', ''),
@@ -14297,14 +14309,9 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                 st.markdown("##### 1️⃣ Dados gerais")
                 colg1, colg2 = st.columns(2)
                 with colg1:
-                    _rot_origem = st.text_input("Origem", value="CHINA", placeholder="Ex: CHINA, BRASIL, ALEMANHA", key="rot_origem")
+                    _rot_importador = st.selectbox("Importador (fixo para todos os itens)", _clientes_disp_rot["apelido"].tolist(), key="rot_importador")
                 with colg2:
-                    _rot_com_solicitante = st.radio("Tem solicitante?", ["Não", "Sim"], horizontal=True, key="rot_tem_solic")
-
-                _rot_solicitante_cnpj = ""
-                if _rot_com_solicitante == "Sim":
-                    _rot_solicitante_cnpj = st.text_input("CNPJ do solicitante", key="rot_solic_cnpj",
-                        help="Aparece quando um cliente empresta o registro para outro.")
+                    _rot_origem = st.text_input("Origem", value="CHINA", placeholder="Ex: CHINA, BRASIL, ALEMANHA", key="rot_origem")
 
                 st.markdown("**De onde puxar o número de registro?**")
                 colr1, colr2 = st.columns(2)
@@ -14436,7 +14443,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             _is_18m = bool(re.search(r'\+\s*18\s*M[EÊ]S', str(_item.get('nome', '')).upper()))
 
                             with st.expander(f"{_ref_curta} — {_nome_curto[:50]}", expanded=(_i < 3)):
-                                _rot_cli_item = st.selectbox("🏢 Cliente/Solicitante", _rot_cli_opcoes, key=f"rot_cli_{_i}")
+                                _rot_cli_item = st.selectbox("🏢 Solicitante", _rot_cli_opcoes, key=f"rot_cli_{_i}")
                                 _logo_bytes_rot_cur, _, _, _ = buscar_logo_cliente(_rot_cli_item)
                                 _cli_prev_data_rot = buscar_cliente_etiqueta(_rot_cli_item)
 
@@ -14612,63 +14619,67 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                     with st.container(border=True):
                         st.markdown("##### 5️⃣ Gerar")
                         if st.button("🏷️ Gerar rotulagem (Word)", type="primary", key="btn_gerar_rotulagem"):
-                            _itens_config_rot = []
-                            _algum_sem_cli = False
-                            for _i, _item in enumerate(_itens_lidos_rot):
-                                _rot_tipo_item = st.session_state.get(f"rot_tipo_{_i}", "padrao")
-                                _rot_titulos_texto = {}
-                                for _cat in CATEGORIAS_POR_TIPO_ETIQUETA.get(_rot_tipo_item, []):
-                                    _escolha = st.session_state.get(f"rot_txt_{_i}_{_cat}")
-                                    if _escolha and _escolha != "— nenhum —":
-                                        _rot_titulos_texto[_cat] = _escolha
-                                _rot_cli_ap = st.session_state.get(f"rot_cli_{_i}", _rot_cli_opcoes[0] if _rot_cli_opcoes else "")
-                                _cli_data_item = buscar_cliente_etiqueta(_rot_cli_ap)
-                                if not _cli_data_item:
-                                    st.error(f"Cliente '{_rot_cli_ap}' não encontrado para o item {_i+1}.")
-                                    _algum_sem_cli = True
-                                    break
-                                _rot_logo_bytes_item, _, _, _ = buscar_logo_cliente(_rot_cli_ap)
-                                _itens_config_rot.append({
-                                    'item': _item,
-                                    'cliente': _cli_data_item,
-                                    'tipo': _rot_tipo_item,
-                                    'variante': st.session_state.get(f"rot_variante_{_i}", _VARIANTES_ROT[0]),
-                                    'pecas': st.session_state.get(f"rot_pecas_{_i}", 1),
-                                    'idade_num': st.session_state.get(f"rot_idadenum_{_i}", 3),
-                                    'idade_uni': st.session_state.get(f"rot_idadeuni_{_i}", "ANOS"),
-                                    'titulos_texto': _rot_titulos_texto,
-                                    'pilha_pos_h': st.session_state.get(f"rot_pilha_pos_h_{_i}", 1.767),
-                                    'pilha_pos_v': st.session_state.get(f"rot_pilha_pos_v_{_i}", 0.172),
-                                    'pilha_largura_cm': st.session_state.get(f"rot_pilha_w_{_i}", 1.0),
-                                    'pilha_altura_cm': st.session_state.get(f"rot_pilha_hh_{_i}", 0.95),
-                                    'logo_ativo': st.session_state.get(f"rot_usar_logo_{_i}", False),
-                                    'logo_png': _rot_logo_bytes_item,
-                                    'logo_pos_h': st.session_state.get(f"rot_logo_pos_h_{_i}", 0.5),
-                                    'logo_pos_v': st.session_state.get(f"rot_logo_pos_v_{_i}", 5.0),
-                                    'logo_largura_cm': st.session_state.get(f"rot_logo_w_{_i}", 2.0),
-                                    'logo_altura_cm': st.session_state.get(f"rot_logo_hh_{_i}", 1.0),
-                                    'larg_col_cm': st.session_state.get(f"rot_label_w_{_i}", 11.48) / 2,
-                                    'altura_linha_cm': st.session_state.get(f"rot_label_h_{_i}", 5.74),
-                                })
-                            if not _algum_sem_cli:
-                                _rot_chorao_bytes, _ = buscar_asset_generico("chorao")
-                                _rot_pilha_bytes_gen, _ = buscar_asset_generico("pilha")
-                                _rot_chorao18_bytes, _ = buscar_asset_generico("chorao18")
+                            _rot_imp_data = buscar_cliente_etiqueta(_rot_importador)
+                            if not _rot_imp_data:
+                                st.error(f"Importador '{_rot_importador}' não encontrado.")
+                            else:
+                                _itens_config_rot = []
+                                _algum_sem_solic = False
+                                for _i, _item in enumerate(_itens_lidos_rot):
+                                    _rot_tipo_item = st.session_state.get(f"rot_tipo_{_i}", "padrao")
+                                    _rot_titulos_texto = {}
+                                    for _cat in CATEGORIAS_POR_TIPO_ETIQUETA.get(_rot_tipo_item, []):
+                                        _escolha = st.session_state.get(f"rot_txt_{_i}_{_cat}")
+                                        if _escolha and _escolha != "— nenhum —":
+                                            _rot_titulos_texto[_cat] = _escolha
+                                    _rot_solic_ap = st.session_state.get(f"rot_cli_{_i}", _rot_cli_opcoes[0] if _rot_cli_opcoes else "")
+                                    _solic_data_item = buscar_cliente_etiqueta(_rot_solic_ap)
+                                    if not _solic_data_item:
+                                        st.error(f"Solicitante '{_rot_solic_ap}' não encontrado para o item {_i+1}.")
+                                        _algum_sem_solic = True
+                                        break
+                                    _rot_logo_bytes_item, _, _, _ = buscar_logo_cliente(_rot_solic_ap)
+                                    _itens_config_rot.append({
+                                        'item': _item,
+                                        'solicitante': _solic_data_item,
+                                        'tipo': _rot_tipo_item,
+                                        'variante': st.session_state.get(f"rot_variante_{_i}", _VARIANTES_ROT[0]),
+                                        'pecas': st.session_state.get(f"rot_pecas_{_i}", 1),
+                                        'idade_num': st.session_state.get(f"rot_idadenum_{_i}", 3),
+                                        'idade_uni': st.session_state.get(f"rot_idadeuni_{_i}", "ANOS"),
+                                        'titulos_texto': _rot_titulos_texto,
+                                        'pilha_pos_h': st.session_state.get(f"rot_pilha_pos_h_{_i}", 1.767),
+                                        'pilha_pos_v': st.session_state.get(f"rot_pilha_pos_v_{_i}", 0.172),
+                                        'pilha_largura_cm': st.session_state.get(f"rot_pilha_w_{_i}", 1.0),
+                                        'pilha_altura_cm': st.session_state.get(f"rot_pilha_hh_{_i}", 0.95),
+                                        'logo_ativo': st.session_state.get(f"rot_usar_logo_{_i}", False),
+                                        'logo_png': _rot_logo_bytes_item,
+                                        'logo_pos_h': st.session_state.get(f"rot_logo_pos_h_{_i}", 0.5),
+                                        'logo_pos_v': st.session_state.get(f"rot_logo_pos_v_{_i}", 5.0),
+                                        'logo_largura_cm': st.session_state.get(f"rot_logo_w_{_i}", 2.0),
+                                        'logo_altura_cm': st.session_state.get(f"rot_logo_hh_{_i}", 1.0),
+                                        'larg_col_cm': st.session_state.get(f"rot_label_w_{_i}", 11.48) / 2,
+                                        'altura_linha_cm': st.session_state.get(f"rot_label_h_{_i}", 5.74),
+                                    })
+                                if not _algum_sem_solic:
+                                    _rot_chorao_bytes, _ = buscar_asset_generico("chorao")
+                                    _rot_pilha_bytes_gen, _ = buscar_asset_generico("pilha")
+                                    _rot_chorao18_bytes, _ = buscar_asset_generico("chorao18")
 
-                                with st.spinner("Gerando rotulagem... (a conversão dos selos pode levar um tempo)"):
-                                    _rot_resultado = _gerar_lote_rotulagem(
-                                        _itens_config_rot, _rot_origem, _rot_solicitante_cnpj,
-                                        _rot_data_fab, _rot_lote, _rot_cliente_base_reg,
-                                        chorao_png_bytes=_rot_chorao_bytes, pilha_png_bytes=_rot_pilha_bytes_gen,
-                                        chorao18_png_bytes=_rot_chorao18_bytes
-                                    )
-                                if _rot_resultado and _rot_resultado.get('docx'):
-                                    st.session_state['rot_docx_bytes'] = _rot_resultado['docx']
-                                    st.session_state['rot_avisos'] = _rot_resultado.get('avisos', [])
-                                    st.success("✅ Rotulagem gerada! Clique em Baixar abaixo.")
-                                else:
-                                    st.session_state.pop('rot_docx_bytes', None)
-                                    st.error("Não foi possível gerar a rotulagem.")
+                                    with st.spinner("Gerando rotulagem... (a conversão dos selos pode levar um tempo)"):
+                                        _rot_resultado = _gerar_lote_rotulagem(
+                                            _itens_config_rot, _rot_imp_data, _rot_origem,
+                                            _rot_data_fab, _rot_lote, _rot_cliente_base_reg,
+                                            chorao_png_bytes=_rot_chorao_bytes, pilha_png_bytes=_rot_pilha_bytes_gen,
+                                            chorao18_png_bytes=_rot_chorao18_bytes
+                                        )
+                                    if _rot_resultado and _rot_resultado.get('docx'):
+                                        st.session_state['rot_docx_bytes'] = _rot_resultado['docx']
+                                        st.session_state['rot_avisos'] = _rot_resultado.get('avisos', [])
+                                        st.success("✅ Rotulagem gerada! Clique em Baixar abaixo.")
+                                    else:
+                                        st.session_state.pop('rot_docx_bytes', None)
+                                        st.error("Não foi possível gerar a rotulagem.")
 
                         if st.session_state.get('rot_docx_bytes'):
                             st.download_button("⬇️ Baixar Word (.docx)",
