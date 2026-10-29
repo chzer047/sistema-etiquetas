@@ -3945,16 +3945,38 @@ def _pasta_trabalho_uno():
 def _python_bundled_libreoffice(soffice_path):
     """A partir do caminho do soffice.bin/exe, deduz o caminho do python.exe
     que vem EMBUTIDO no próprio LibreOffice (é esse Python que tem o módulo
-    'uno' funcionando corretamente — o Python do Windows normal não tem)."""
-    import os as _osw
+    'uno' funcionando corretamente — o Python do Windows normal não tem).
+    No Linux, se não houver Python na pasta do LO, tenta o python3 do sistema
+    (instalações via pacote costumam ter python3-uno no PATH)."""
+    import os as _osw, shutil as _shw, sys as _sysw
     if not soffice_path or soffice_path == "soffice":
-        return None
-    _pasta_program = _osw.path.dirname(soffice_path)
-    for _nome in ("python.exe", "python"):
-        _cand = _osw.path.join(_pasta_program, _nome)
-        if _osw.path.exists(_cand):
-            return _cand
-    return None
+        # Sem caminho completo — ainda tenta o sistema como fallback
+        pass
+    else:
+        # Tenta primeiro na pasta do soffice (Windows bundled python.exe)
+        _pasta_program = _osw.path.dirname(soffice_path)
+        for _nome in ("python.exe", "python3", "python"):
+            _cand = _osw.path.join(_pasta_program, _nome)
+            if _osw.path.exists(_cand):
+                return _cand
+        # No Linux, /usr/bin/soffice é symlink — resolve o alvo real
+        try:
+            _real = _osw.path.realpath(soffice_path)
+            _pasta_real = _osw.path.dirname(_real)
+            if _pasta_real != _pasta_program:
+                for _nome in ("python3", "python"):
+                    _cand = _osw.path.join(_pasta_real, _nome)
+                    if _osw.path.exists(_cand):
+                        return _cand
+        except Exception:
+            pass
+    # Fallback: python3/python do sistema (em distros Linux com python3-uno)
+    for _cmd in ("python3", "python"):
+        _p = _shw.which(_cmd)
+        if _p and _osw.path.exists(_p):
+            return _p
+    # Último recurso: o próprio interpretador que está rodando o Streamlit
+    return _sysw.executable or None
 
 
 _SCRIPT_CONVERSOR_UNO = '''import sys
@@ -6032,8 +6054,67 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
             textos_por_chave[(_row['tipo'], _row['categoria'], _row['titulo'])] = _row['conteudo']
 
     _cache_selo = {}
+    _SELO_FALHOU = object()  # sentinela: distingue "não tentou" de "tentou e falhou"
     import streamlit as _st_lo
     _lo_indisponivel = _st_lo.session_state.get('_lo_indisponivel', False)
+
+    # PRÉ-CONVERSÃO EM LOTE: resolve todos os selos numa única chamada ao
+    # LibreOffice (UNO listener), evitando pagar o custo de inicialização por
+    # item. Cai silenciosamente no modo individual se o lote falhar.
+    if not _lo_indisponivel and _soffice_existe:
+        import tempfile as _tmp_lote, os as _os_lote, shutil as _sh_lote
+        from PIL import Image as _ImgLote, ImageOps as _IOLote
+        from io import BytesIO as _BioLote
+
+        _registros_por_item = []
+        for _cfg in itens_config:
+            _item_r = _cfg['item']
+            _reg_excel = re.sub(r'\s', '', _item_r.get('registro', '') or '')
+            _reg_base = buscar_registro_por_fabrica_familia(
+                cliente_base_registro, _item_r.get('fabrica', ''), _item_r.get('familia', '')
+            )
+            _reg_base = re.sub(r'\s', '', _reg_base or '')
+            _registros_por_item.append(_reg_base if _reg_base else _reg_excel)
+
+        _chaves_unicas = list(dict.fromkeys(
+            (c['variante'], r) for c, r in zip(itens_config, _registros_por_item)
+            if r and buscar_modelo_selo(c['variante'])
+        ))
+
+        if _chaves_unicas:
+            _pasta_lote = _tmp_lote.mkdtemp(prefix="cxml_rot_lote_")
+            try:
+                _jobs_lote = []
+                _chave_para_docx_path = {}
+                for _cv, _cr in _chaves_unicas:
+                    _docx_b = gerar_selo_com_registro(_cv, _cr)
+                    if _docx_b:
+                        _docx_p = _os_lote.path.join(_pasta_lote, f"selo_{_cv}_{_cr}.docx")
+                        _png_p = _docx_p.replace(".docx", ".png")
+                        with open(_docx_p, "wb") as _f_lote:
+                            _f_lote.write(_docx_b)
+                        _jobs_lote.append((_docx_p, _png_p, "writer_png_Export"))
+                        _chave_para_docx_path[(_cv, _cr)] = (_docx_p, _png_p)
+
+                if _jobs_lote:
+                    _res_lote = _converter_lote_via_uno_listener(_jobs_lote, soffice)
+                    if _res_lote is not None:
+                        for (_cv, _cr), (_dp, _pp) in _chave_para_docx_path.items():
+                            _ok_l, _err_l = _res_lote.get(_dp, (False, "sem resultado"))
+                            if _ok_l and _os_lote.path.exists(_pp):
+                                try:
+                                    _img_l = _ImgLote.open(_pp)
+                                    _inv_l = _IOLote.invert(_img_l.convert("RGB"))
+                                    _bbox_l = _inv_l.getbbox()
+                                    if _bbox_l:
+                                        _img_l = _img_l.crop(_bbox_l)
+                                    _out_l = _BioLote()
+                                    _img_l.save(_out_l, format="PNG")
+                                    _cache_selo[(_cv, _cr)] = _out_l.getvalue()
+                                except Exception:
+                                    pass  # cai no modo individual abaixo
+            finally:
+                _sh_lote.rmtree(_pasta_lote, ignore_errors=True)
 
     doc = _Doc()
     for section in doc.sections:
@@ -6071,8 +6152,10 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
             )
 
         _chave_selo = (cfg['variante'], registro)
-        selo_png = _cache_selo.get(_chave_selo)
-        if selo_png is None:
+        _cached = _cache_selo.get(_chave_selo, _SELO_FALHOU)
+        if _cached is _SELO_FALHOU:
+            # Chave ainda não tentada
+            selo_png = None
             _modelo_existe = buscar_modelo_selo(cfg['variante'])
             if not _modelo_existe:
                 avisos.append(f"Item {ref_curta}: modelo de selo '{cfg['variante']}' não cadastrado.")
@@ -6100,7 +6183,9 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
                                 avisos.append("⚠️ LibreOffice parece indisponível — conversão cancelada.")
                 else:
                     avisos.append(f"Item {ref_curta}: não consegui gravar o registro no modelo de selo.")
-            _cache_selo[_chave_selo] = selo_png
+            _cache_selo[_chave_selo] = selo_png  # None = falhou; será ignorado na próxima tentativa idêntica
+        else:
+            selo_png = _cached  # pode ser None (falhou antes) ou bytes (OK)
         if not selo_png:
             avisos.append(f"Item {ref_curta}: selo '{cfg['variante']}' não gerado.")
 
