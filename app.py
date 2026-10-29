@@ -4776,8 +4776,10 @@ def _montar_etiqueta_no_doc(doc, dados, selo_png, barcode_png, chorao_png=None, 
         add_linha(cell_esq, "Solicitante da certificação:")
         add_linha(cell_esq, dados['solicitante_razao'])
         if dados.get('solicitante_endereco'):
-            add_linha(cell_esq, dados['solicitante_endereco'])
-        add_linha(cell_esq, f"CNPJ: {dados['solicitante_cnpj']}")
+            _cnpj_solic = f" / CNPJ: {dados['solicitante_cnpj']}" if dados.get('solicitante_cnpj') else ""
+            add_linha(cell_esq, f"{dados['solicitante_endereco']}{_cnpj_solic}")
+        elif dados.get('solicitante_cnpj'):
+            add_linha(cell_esq, f"CNPJ: {dados['solicitante_cnpj']}")
         if dados.get('solicitante_sac'):
             add_linha(cell_esq, f"SAC: {dados['solicitante_sac']}")
     elif dados.get('solicitante_cnpj'):
