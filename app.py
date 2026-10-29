@@ -6006,10 +6006,12 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
 
 
 def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
-                          cliente_base_registro, chorao_png_bytes=None, pilha_png_bytes=None,
+                          cliente_base_registro, solicitante=None,
+                          chorao_png_bytes=None, pilha_png_bytes=None,
                           chorao18_png_bytes=None):
     """Gera o Word de rotulagem. Cada item em itens_config deve ter um campo 'cliente'
-    com os dados do importador específico para aquele item."""
+    com os dados do importador específico. 'solicitante' é um dict opcional com
+    razao_social, cnpj, endereco, sac — aparece acima do importador na etiqueta."""
     from docx import Document as _Doc
     from docx.shared import Cm as _Cm, Pt as _Pt
     from io import BytesIO as _Bio
@@ -6116,7 +6118,10 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
         textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave)
 
         dados = {
-            'solicitante_cnpj': None,
+            'solicitante_razao': solicitante.get('razao_social') if solicitante else None,
+            'solicitante_endereco': solicitante.get('endereco') if solicitante else None,
+            'solicitante_cnpj': solicitante.get('cnpj') if solicitante else None,
+            'solicitante_sac': solicitante.get('sac') if solicitante else None,
             'importador_razao': cliente['razao_social'],
             'importador_endereco': cliente['endereco'],
             'importador_cnpj': cliente['cnpj'],
@@ -14307,6 +14312,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                 _rot_origem = st.text_input("Origem", value="CHINA", placeholder="Ex: CHINA, BRASIL, ALEMANHA", key="rot_origem")
 
                 st.markdown("**De onde puxar o número de registro?**")
+
                 colr1, colr2 = st.columns(2)
                 with colr1:
                     _rot_sistema_reg = st.radio("Sistema", ["Sistema 5 Novo Projeto (Bolsa)", "Sistema 5 Próprios", "Sistema 5 Focus"],
@@ -14327,7 +14333,18 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             st.warning("Nenhum cliente na base de Registros.")
 
             with st.container(border=True):
-                st.markdown("##### 2️⃣ Dados do lote")
+                st.markdown("##### 2️⃣ Solicitante da certificação")
+                st.caption("Preencha se houver solicitante. Aparece acima do Importador na etiqueta.")
+                cols1, cols2 = st.columns(2)
+                with cols1:
+                    _rot_solic_razao = st.text_input("Razão Social", key="rot_solic_razao", placeholder="Ex: EMPRESA LTDA")
+                    _rot_solic_cnpj = st.text_input("CNPJ", key="rot_solic_cnpj", placeholder="Ex: 00.000.000/0001-00")
+                with cols2:
+                    _rot_solic_endereco = st.text_input("Endereço", key="rot_solic_endereco", placeholder="Ex: Rua X, 123 – Cidade – SC")
+                    _rot_solic_sac = st.text_input("SAC (opcional)", key="rot_solic_sac", placeholder="Ex: 0800 000 0000")
+
+            with st.container(border=True):
+                st.markdown("##### 3️⃣ Dados do lote")
                 cold1, cold2 = st.columns(2)
                 with cold1:
                     _rot_data_fab = st.text_input("Data de Fabricação", value="", placeholder="Ex: Julho/2026", key="rot_data_fab")
@@ -14335,7 +14352,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                     _rot_lote = st.text_input("Lote", value="", placeholder="Ex: 202607", key="rot_lote")
 
             with st.container(border=True):
-                st.markdown("##### 3️⃣ Excel (Packing List)")
+                st.markdown("##### 4️⃣ Excel (Packing List)")
                 _rot_excel = st.file_uploader("Enviar Excel do Packing List", type=["xls", "xlsx"], key="rot_excel_upload")
 
             if _rot_excel is not None:
@@ -14415,8 +14432,8 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                     _rot_cli_opcoes = _clientes_disp_rot["apelido"].tolist()
 
                     with st.container(border=True):
-                        st.markdown("##### 4️⃣ Configurar cada item")
-                        st.caption("Para cada item: escolha o cliente/solicitante, o tipo, a variante de selo e a quantidade.")
+                        st.markdown("##### 5️⃣ Configurar cada item")
+                        st.caption("Para cada item: escolha o importador, o tipo, a variante de selo e a quantidade.")
 
                         _TIPOS_ETIQUETA_ROT = {
                             "padrao": "Padrão",
@@ -14436,7 +14453,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                             _is_18m = bool(re.search(r'\+\s*18\s*M[EÊ]S', str(_item.get('nome', '')).upper()))
 
                             with st.expander(f"{_ref_curta} — {_nome_curto[:50]}", expanded=(_i < 3)):
-                                _rot_cli_item = st.selectbox("🏢 Solicitante", _rot_cli_opcoes, key=f"rot_cli_{_i}")
+                                _rot_cli_item = st.selectbox("🏢 Importador", _rot_cli_opcoes, key=f"rot_cli_{_i}")
                                 _logo_bytes_rot_cur, _, _, _ = buscar_logo_cliente(_rot_cli_item)
                                 _cli_prev_data_rot = buscar_cliente_etiqueta(_rot_cli_item)
 
@@ -14610,7 +14627,7 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 _stc_rot.html(_rot_canvas_html, height=max(520, int(_rot_label_h * 36) + 80))
 
                     with st.container(border=True):
-                        st.markdown("##### 5️⃣ Gerar")
+                        st.markdown("##### 6️⃣ Gerar")
                         if st.button("🏷️ Gerar rotulagem (Word)", type="primary", key="btn_gerar_rotulagem"):
                             _itens_config_rot = []
                             _algum_sem_solic = False
@@ -14655,10 +14672,21 @@ Cadastre os selos e os assets genéricos aqui primeiro — sem isso, a geração
                                 _rot_pilha_bytes_gen, _ = buscar_asset_generico("pilha")
                                 _rot_chorao18_bytes, _ = buscar_asset_generico("chorao18")
 
+                                _rot_solic_data = None
+                                _solic_razao_val = st.session_state.get('rot_solic_razao', '').strip()
+                                _solic_cnpj_val = st.session_state.get('rot_solic_cnpj', '').strip()
+                                if _solic_razao_val or _solic_cnpj_val:
+                                    _rot_solic_data = {
+                                        'razao_social': _solic_razao_val,
+                                        'cnpj': _solic_cnpj_val,
+                                        'endereco': st.session_state.get('rot_solic_endereco', '').strip(),
+                                        'sac': st.session_state.get('rot_solic_sac', '').strip(),
+                                    }
                                 with st.spinner("Gerando rotulagem... (a conversão dos selos pode levar um tempo)"):
                                     _rot_resultado = _gerar_lote_rotulagem(
                                         _itens_config_rot, _rot_origem,
                                         _rot_data_fab, _rot_lote, _rot_cliente_base_reg,
+                                        solicitante=_rot_solic_data,
                                         chorao_png_bytes=_rot_chorao_bytes, pilha_png_bytes=_rot_pilha_bytes_gen,
                                         chorao18_png_bytes=_rot_chorao18_bytes
                                     )
