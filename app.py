@@ -6098,10 +6098,44 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
                         _chave_para_docx_path[(_cv, _cr)] = (_docx_p, _png_p)
 
                 if _jobs_lote:
+                    # Método 1: UNO batch (uma ponte UNO para todos os arquivos)
                     _res_lote = _converter_lote_via_uno_listener(_jobs_lote, soffice)
+
+                    # Método 2 (fallback): soffice --convert-to com todos os arquivos numa chamada só
+                    if _res_lote is None:
+                        import subprocess as _sp_batch
+                        _env_b = dict(_os_lote.environ)
+                        _env_b.update({"HOME": _pasta_lote, "TMPDIR": _pasta_lote,
+                                       "TMP": _pasta_lote, "TEMP": _pasta_lote})
+                        try:
+                            _inputs_b = [_dp for _dp, _pp, _ in _jobs_lote]
+                            _sbr = _sp_batch.run(
+                                [soffice, "--headless", "--norestore", "--invisible", "--nologo",
+                                 "--nofirststartwizard", "--nodefault", "--nolockcheck",
+                                 "--convert-to", "png", "--outdir", _pasta_lote] + _inputs_b,
+                                capture_output=True,
+                                timeout=max(120, 15 * len(_jobs_lote)),
+                                env=_env_b
+                            )
+                            _res_lote = {}
+                            for _dp_b, _pp_b, _ in _jobs_lote:
+                                _nome_base = _os_lote.path.splitext(_os_lote.path.basename(_dp_b))[0]
+                                _png_gerado = _os_lote.path.join(_pasta_lote, _nome_base + ".png")
+                                if _os_lote.path.exists(_png_gerado):
+                                    if _png_gerado != _pp_b:
+                                        _os_lote.rename(_png_gerado, _pp_b)
+                                    _res_lote[_dp_b] = (True, None)
+                                else:
+                                    _res_lote[_dp_b] = (False, "PNG não gerado")
+                            if not any(v[0] for v in _res_lote.values()):
+                                _res_lote = None
+                        except Exception:
+                            _res_lote = None
+
+                    # Processa resultados do lote (qualquer método que funcionou)
                     if _res_lote is not None:
                         for (_cv, _cr), (_dp, _pp) in _chave_para_docx_path.items():
-                            _ok_l, _err_l = _res_lote.get(_dp, (False, "sem resultado"))
+                            _ok_l, _ = _res_lote.get(_dp, (False, "sem resultado"))
                             if _ok_l and _os_lote.path.exists(_pp):
                                 try:
                                     _img_l = _ImgLote.open(_pp)
@@ -6113,7 +6147,17 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
                                     _img_l.save(_out_l, format="PNG")
                                     _cache_selo[(_cv, _cr)] = _out_l.getvalue()
                                 except Exception:
-                                    pass  # cai no modo individual abaixo
+                                    pass
+                    else:
+                        # Ambos os métodos em lote falharam: desabilita tentativas
+                        # por item para gerar o Word rapidamente (sem selos).
+                        _lo_indisponivel = True
+                        _st_lo.session_state['_lo_indisponivel'] = True
+                        avisos.append(
+                            "⚠️ LibreOffice não conseguiu converter os selos em lote "
+                            "(UNO e --convert-to falharam). O Word será gerado sem selos. "
+                            "Verifique se o LibreOffice está instalado corretamente."
+                        )
             finally:
                 _sh_lote.rmtree(_pasta_lote, ignore_errors=True)
 
