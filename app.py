@@ -6089,7 +6089,8 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
                 for _cv, _cr in _chaves_unicas:
                     _docx_b = gerar_selo_com_registro(_cv, _cr)
                     if _docx_b:
-                        _docx_p = _os_lote.path.join(_pasta_lote, f"selo_{_cv}_{_cr}.docx")
+                        _cr_safe = re.sub(r'[/\\:*?"<>|]', '_', _cr)
+                        _docx_p = _os_lote.path.join(_pasta_lote, f"selo_{_cv}_{_cr_safe}.docx")
                         _png_p = _docx_p.replace(".docx", ".png")
                         with open(_docx_p, "wb") as _f_lote:
                             _f_lote.write(_docx_b)
