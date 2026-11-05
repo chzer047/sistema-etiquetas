@@ -2004,6 +2004,7 @@ def salvar_ou_atualizar_certificado(
 # ==========================================
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def exportar_todos_itens():
     return pd.read_sql_query("""
     SELECT
@@ -2028,6 +2029,128 @@ def exportar_todos_itens():
     AND r.familia = c.familia
     ORDER BY i.marca, i.modelo, c.ip_bri, i.ordem
     """, conn)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _ler_db_bytes():
+    if not Path(DB_PATH).exists():
+        return None
+    with open(DB_PATH, "rb") as _f:
+        return _f.read()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _listar_marcas_banco():
+    return pd.read_sql_query("""
+    SELECT DISTINCT marca FROM itens
+    WHERE marca IS NOT NULL AND marca != ''
+    ORDER BY marca
+    """, conn)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _itens_por_marca(marca):
+    return pd.read_sql_query("""
+    SELECT
+        i.marca AS marca,
+        i.modelo AS modelo,
+        i.nome AS nome,
+        i.codigo AS codigo,
+        c.ip_bri AS ip_bri,
+        c.ce_bri AS ce_bri,
+        r.registro AS registro,
+        c.familia AS fam,
+        r.fabrica AS fabrica,
+        c.rev AS rev,
+        c.produto AS produto,
+        c.data_emissao AS data_emissao,
+        i.ordem AS ordem
+    FROM itens i
+    INNER JOIN certificados c ON c.id = i.certificado_id
+    LEFT JOIN registros r ON UPPER(r.ce_bri) = UPPER(c.ce_bri) AND r.familia = c.familia
+    WHERE i.marca = ?
+    ORDER BY i.modelo, c.ip_bri
+    """, conn, params=(marca,))
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _clientes_base_disponiveis_registros():
+    return [r[0] for r in cursor.execute(
+        "SELECT DISTINCT cliente_base FROM registros "
+        "WHERE cliente_base IS NOT NULL AND cliente_base != '' ORDER BY cliente_base"
+    ).fetchall()]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _familias_por_cliente_reg(cliente):
+    return [r[0] for r in cursor.execute(
+        "SELECT DISTINCT familia FROM registros "
+        "WHERE UPPER(cliente_base) = UPPER(?) AND familia IS NOT NULL AND familia != '' ORDER BY familia",
+        (cliente,)
+    ).fetchall()]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _itens_registros_cliente_familia(cliente, familia):
+    return cursor.execute(
+        "SELECT id, cliente_base, fabrica, ce_bri, familia, registro, endereco_fabrica "
+        "FROM registros WHERE UPPER(cliente_base) = UPPER(?) AND familia = ? ORDER BY fabrica, ce_bri",
+        (cliente, familia)
+    ).fetchall()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _bases_existentes_registros():
+    return pd.read_sql_query("""
+    SELECT DISTINCT cliente_base FROM registros
+    WHERE cliente_base IS NOT NULL AND cliente_base != ''
+    ORDER BY cliente_base
+    """, conn)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _registros_por_base(base):
+    return pd.read_sql_query("""
+    SELECT cliente_base, fabrica, ce_bri, familia, registro, endereco_fabrica
+    FROM registros WHERE cliente_base = ?
+    ORDER BY fabrica, CAST(familia AS INTEGER)
+    """, conn, params=(base,))
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _bases_e_fabricas_para_editar():
+    return pd.read_sql_query("""
+    SELECT DISTINCT cliente_base FROM registros
+    WHERE cliente_base IS NOT NULL AND cliente_base != ''
+    ORDER BY cliente_base
+    """, conn)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _fabricas_por_base_registros(base):
+    return pd.read_sql_query("""
+    SELECT fabrica, MAX(ce_bri) AS ce_bri, MAX(endereco_fabrica) AS endereco_fabrica
+    FROM registros WHERE cliente_base = ?
+    GROUP BY fabrica ORDER BY fabrica
+    """, conn, params=(base,))
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _bases_para_excluir_registros():
+    return pd.read_sql_query("""
+    SELECT DISTINCT cliente_base, COUNT(*) AS total_registros, COUNT(DISTINCT fabrica) AS total_fabricas
+    FROM registros WHERE cliente_base IS NOT NULL AND cliente_base != ''
+    GROUP BY cliente_base ORDER BY cliente_base
+    """, conn)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _debug_nomes_sistema5():
+    return pd.read_sql_query(
+        "SELECT DISTINCT UPPER(TRIM(nome)) AS nome FROM sistema5_itens "
+        "WHERE nome IS NOT NULL AND TRIM(nome)!='' ORDER BY nome LIMIT 30",
+        conn
+    )['nome'].tolist()
 
 
 # ==========================================
@@ -2296,6 +2419,7 @@ def salvar_registros_mesclado(banco_registros, arquivo_nome, cliente_base, ender
     return _resumo
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def exportar_registros_banco():
     return pd.read_sql_query("""
     SELECT
@@ -8232,6 +8356,7 @@ def pesquisar_global_sistema5(termo):
 # PAINEL DE COBERTURA
 # ==========================================
 
+@st.cache_data(ttl=60, show_spinner=False)
 def cobertura_resumo_geral():
     dados = {}
 
@@ -8289,6 +8414,7 @@ def cobertura_resumo_geral():
     return dados
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def cobertura_fabricas():
     return pd.read_sql_query("""
     WITH chaves AS (
@@ -8368,6 +8494,7 @@ def cobertura_fabricas():
     ORDER BY chaves.cliente_base, chaves.fabrica
     """, conn)
 
+@st.cache_data(ttl=60, show_spinner=False)
 def cobertura_familias_detalhada(cliente_base="", fabrica="", ce_bri=""):
     where = []
     params = []
@@ -9356,9 +9483,8 @@ if _is_active("certificados"):
             st.success("✅ Backup importado! Recarregando...")
             st.rerun()
 
-    if Path(DB_PATH).exists():
-        with open(DB_PATH, "rb") as f:
-            _db_bytes = f.read()
+    _db_bytes = _ler_db_bytes()
+    if _db_bytes is not None:
         st.download_button(
             "Baixar backup atualizado",
             _db_bytes,
@@ -9576,13 +9702,7 @@ if _is_active("certificados"):
 
     st.subheader("Filtro geral por Marca")
 
-    marcas_banco = pd.read_sql_query("""
-    SELECT DISTINCT marca
-    FROM itens
-    WHERE marca IS NOT NULL
-    AND marca != ''
-    ORDER BY marca
-    """, conn)
+    marcas_banco = _listar_marcas_banco()
 
     if marcas_banco.empty:
         st.info("Nenhuma marca cadastrada.")
@@ -9593,30 +9713,7 @@ if _is_active("certificados"):
             key="marca_filtro"
         )
 
-        resultado_marca = pd.read_sql_query("""
-        SELECT
-            i.marca AS marca,
-            i.modelo AS modelo,
-            i.nome AS nome,
-            i.codigo AS codigo,
-            c.ip_bri AS ip_bri,
-            c.ce_bri AS ce_bri,
-            r.registro AS registro,
-            c.familia AS fam,
-            r.fabrica AS fabrica,
-            c.rev AS rev,
-            c.produto AS produto,
-            c.data_emissao AS data_emissao,
-            i.ordem AS ordem
-        FROM itens i
-        INNER JOIN certificados c
-        ON c.id = i.certificado_id
-        LEFT JOIN registros r
-        ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
-        AND r.familia = c.familia
-        WHERE i.marca = ?
-        ORDER BY i.modelo, c.ip_bri
-        """, conn, params=(marca_filtro,))
+        resultado_marca = _itens_por_marca(marca_filtro)
 
         st.dataframe(normalizar_df_para_exibicao(resultado_marca), use_container_width=True)
 
@@ -10008,34 +10105,21 @@ if _is_active("registros"):
     st.subheader("✏️ Editar registro de um item específico")
     st.caption("Selecione o cliente e a família pra ajustar só o número de registro, sem reenviar o Excel inteiro.")
 
-    _clientes_disponiveis = [r[0] for r in cursor.execute(
-        "SELECT DISTINCT cliente_base FROM registros WHERE cliente_base IS NOT NULL AND cliente_base != '' ORDER BY cliente_base"
-    ).fetchall()]
+    _clientes_disponiveis = _clientes_base_disponiveis_registros()
 
     if not _clientes_disponiveis:
         st.info("Nenhum registro cadastrado ainda.")
     else:
         _cliente_edicao = st.selectbox("Cliente", _clientes_disponiveis, key="editar_registro_cliente")
 
-        _familias_disponiveis = [r[0] for r in cursor.execute(
-            """SELECT DISTINCT familia FROM registros
-               WHERE UPPER(cliente_base) = UPPER(?) AND familia IS NOT NULL AND familia != ''
-               ORDER BY familia""",
-            (_cliente_edicao,)
-        ).fetchall()]
+        _familias_disponiveis = _familias_por_cliente_reg(_cliente_edicao)
 
         if not _familias_disponiveis:
             st.info("Nenhuma família encontrada para esse cliente.")
         else:
             _familia_edicao = st.selectbox("Família", _familias_disponiveis, key="editar_registro_familia")
 
-            _itens_para_editar = cursor.execute(
-                """SELECT id, cliente_base, fabrica, ce_bri, familia, registro, endereco_fabrica
-                   FROM registros
-                   WHERE UPPER(cliente_base) = UPPER(?) AND familia = ?
-                   ORDER BY fabrica, ce_bri""",
-                (_cliente_edicao, _familia_edicao)
-            ).fetchall()
+            _itens_para_editar = _itens_registros_cliente_familia(_cliente_edicao, _familia_edicao)
 
             if not _itens_para_editar:
                 st.info("Nenhum registro encontrado para essa combinação.")
@@ -10101,9 +10185,8 @@ if _is_active("registros"):
             st.success("✅ Backup importado! Recarregando...")
             st.rerun()
 
-    if Path(DB_PATH).exists():
-        with open(DB_PATH, "rb") as f:
-            _db_bytes_reg = f.read()
+    _db_bytes_reg = _ler_db_bytes()
+    if _db_bytes_reg is not None:
         st.download_button(
             "Baixar backup atualizado",
             _db_bytes_reg,
@@ -10130,13 +10213,7 @@ if _is_active("registros"):
 
     st.subheader("Visualizar Bases")
 
-    bases_existentes = pd.read_sql_query("""
-    SELECT DISTINCT cliente_base
-    FROM registros
-    WHERE cliente_base IS NOT NULL
-    AND cliente_base != ''
-    ORDER BY cliente_base
-    """, conn)
+    bases_existentes = _bases_existentes_registros()
 
     if bases_existentes.empty:
         st.info("Nenhuma base salva ainda.")
@@ -10147,18 +10224,7 @@ if _is_active("registros"):
             key="visualizar_base"
         )
 
-        registros_base = pd.read_sql_query("""
-        SELECT
-            cliente_base,
-            fabrica,
-            ce_bri,
-            familia,
-            registro,
-            endereco_fabrica
-        FROM registros
-        WHERE cliente_base = ?
-        ORDER BY fabrica, CAST(familia AS INTEGER)
-        """, conn, params=(base_selecionada,))
+        registros_base = _registros_por_base(base_selecionada)
 
         fabricas = registros_base["fabrica"].unique().tolist()
 
@@ -10195,13 +10261,7 @@ if _is_active("registros"):
     st.subheader("Editar endereço e CE-BRI de fábrica já salva")
     st.caption("As alterações são aplicadas em todos os registros da fábrica e também no Sistema 5 automaticamente.")
 
-    bases_para_editar = pd.read_sql_query("""
-    SELECT DISTINCT cliente_base
-    FROM registros
-    WHERE cliente_base IS NOT NULL
-    AND cliente_base != ''
-    ORDER BY cliente_base
-    """, conn)
+    bases_para_editar = _bases_e_fabricas_para_editar()
 
     if bases_para_editar.empty:
         st.info("Nenhuma base disponível para edição.")
@@ -10212,16 +10272,7 @@ if _is_active("registros"):
             key="editar_endereco_base"
         )
 
-        fabricas_para_editar = pd.read_sql_query("""
-        SELECT
-            fabrica,
-            MAX(ce_bri) AS ce_bri,
-            MAX(endereco_fabrica) AS endereco_fabrica
-        FROM registros
-        WHERE cliente_base = ?
-        GROUP BY fabrica
-        ORDER BY fabrica
-        """, conn, params=(base_editar,))
+        fabricas_para_editar = _fabricas_por_base_registros(base_editar)
 
         if fabricas_para_editar.empty:
             st.info("Nenhuma fábrica encontrada nessa base.")
@@ -10490,15 +10541,7 @@ if _is_active("registros"):
     st.subheader("🗑️ Excluir registros de um cliente")
     st.caption("Remove permanentemente todos os registros de uma base/cliente do banco. Não afeta certificados nem Sistema 5.")
 
-    bases_para_excluir = pd.read_sql_query("""
-    SELECT DISTINCT cliente_base,
-        COUNT(*) AS total_registros,
-        COUNT(DISTINCT fabrica) AS total_fabricas
-    FROM registros
-    WHERE cliente_base IS NOT NULL AND cliente_base != ''
-    GROUP BY cliente_base
-    ORDER BY cliente_base
-    """, conn)
+    bases_para_excluir = _bases_para_excluir_registros()
 
     if bases_para_excluir.empty:
         st.info("Nenhuma base cadastrada para excluir.")
@@ -15375,11 +15418,7 @@ if _is_active("gerar_descricoes"):
 
         # ---- Debug: mostra exemplos reais do banco + testador de regex ----
         with st.expander("🔬 Debug: ver exemplos reais do banco de dados", expanded=False):
-            _ex_rows = pd.read_sql_query(
-                "SELECT DISTINCT UPPER(TRIM(nome)) AS nome FROM sistema5_itens "
-                "WHERE nome IS NOT NULL AND TRIM(nome)!='' ORDER BY nome LIMIT 30",
-                conn
-            )['nome'].tolist()
+            _ex_rows = _debug_nomes_sistema5()
             if _ex_rows:
                 st.markdown("**Primeiros 30 registros da coluna `nome`:**")
                 for _i, _ex_n in enumerate(_ex_rows, 1):
