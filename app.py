@@ -7144,6 +7144,15 @@ def corrigir_marca_codigo_invertidos_s5(marca, codigo_raw):
     return marca_limpa, codigo_limpo
 
 
+@st.cache_data(show_spinner=False)
+def _ler_excel_sistema5_cached(file_bytes: bytes, file_name: str):
+    """Wrapper cacheado em torno de ler_excel_inclusao_sistema5 para evitar re-leitura a cada rerun."""
+    from io import BytesIO as _BytesIO_xls
+    _buf = _BytesIO_xls(file_bytes)
+    _buf.name = file_name
+    return ler_excel_inclusao_sistema5(_buf)
+
+
 def ler_excel_inclusao_sistema5(uploaded_file):
     """
     Leitor específico do Sistema 5 com preservação de código de barras.
@@ -7444,6 +7453,7 @@ def buscar_fabricante_por_fabrica_s5(cliente_base, fabrica, ce_bri=""):
     return clean(resultado.iloc[0]["marca"]) if not resultado.empty else ""
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def ip_processo_ja_existe_sistema5(ip_processo, cliente_base="", fabrica=""):
     """
     Retorna os processos já salvos com o mesmo IP.
@@ -7598,6 +7608,7 @@ def verificar_itens_sem_medidas(cliente_base=""):
     return df[~df["NOME"].apply(lambda n: bool(_pat.search(str(n))))].copy()
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def listar_todas_fabricas_para_mover():
     """Lista todas as fábricas do Sistema 5 para usar como destino no mover em lote."""
     return pd.read_sql_query("""
@@ -10869,23 +10880,29 @@ if _is_active("sistema5"):
     st.divider()
 
     # ---- Download lista de fábricas ----
-    _df_fab_dl = pd.read_sql_query("""
-        SELECT
-            c.cliente_base   AS CLIENTE,
-            f.ce_bri         AS "CE-BRI",
-            f.endereco_fabrica AS ENDEREÇO
-        FROM sistema5_fabricas f
-        INNER JOIN sistema5_clientes c ON c.id = f.cliente_id
-        ORDER BY c.cliente_base, f.ce_bri
-    """, conn)
+    @st.cache_data(ttl=120, show_spinner=False)
+    def _excel_fabricas_s5():
+        _df = pd.read_sql_query("""
+            SELECT
+                c.cliente_base   AS CLIENTE,
+                f.ce_bri         AS "CE-BRI",
+                f.endereco_fabrica AS ENDEREÇO
+            FROM sistema5_fabricas f
+            INNER JOIN sistema5_clientes c ON c.id = f.cliente_id
+            ORDER BY c.cliente_base, f.ce_bri
+        """, conn)
+        if _df.empty:
+            return None
+        _buf = BytesIO()
+        with pd.ExcelWriter(_buf, engine='openpyxl') as _w:
+            _df.to_excel(_w, index=False, sheet_name="Fábricas")
+        return _buf.getvalue()
 
-    if not _df_fab_dl.empty:
-        _buf_fab = BytesIO()
-        with pd.ExcelWriter(_buf_fab, engine='openpyxl') as _writer_fab:
-            _df_fab_dl.to_excel(_writer_fab, index=False, sheet_name="Fábricas")
+    _fab_dl_bytes = _excel_fabricas_s5()
+    if _fab_dl_bytes:
         st.download_button(
             "📥 Baixar lista de fábricas (Excel)",
-            _buf_fab.getvalue(),
+            _fab_dl_bytes,
             "fabricas_sistema5.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="download_fabricas_s5"
@@ -11197,7 +11214,8 @@ if _is_active("sistema5"):
                 dup = ip_processo_ja_existe_sistema5(ip_extraido, cliente_s5, fab_final)
 
                 try:
-                    df_arq = ler_excel_inclusao_sistema5(arquivo_s5)
+                    arquivo_s5.seek(0)
+                    df_arq = _ler_excel_sistema5_cached(arquivo_s5.read(), arquivo_s5.name)
                 except Exception as e:
                     erros.append({"arquivo": arquivo_s5.name, "motivo": str(e)})
                     continue
