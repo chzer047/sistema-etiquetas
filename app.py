@@ -11657,147 +11657,179 @@ if _is_active("sistema5"):
     if processos_s5.empty:
         st.info("Nenhum processo salvo ainda.")
     else:
-        categorias = processos_s5["categoria"].dropna().unique().tolist()
+        # ---- Navegação em duas camadas: lista → detalhe de um cliente ----
+        # Usar session_state para evitar renderizar todos os processos de todos os
+        # clientes ao mesmo tempo (causa o travamento reportado).
+        _s5_nav = st.session_state.get("s5_nav_cliente")  # None = visão geral
 
-        for categoria in categorias:
-            with st.expander(f"📁 {categoria}", expanded=True):
-                bloco_categoria = processos_s5[processos_s5["categoria"] == categoria]
-                clientes = bloco_categoria["cliente_base"].dropna().unique().tolist()
+        if _s5_nav:
+            # ========== VISÃO DETALHE: processos de um único cliente ==========
+            if st.button("← Voltar para todos os clientes", key="s5_nav_voltar"):
+                del st.session_state["s5_nav_cliente"]
+                st.rerun()
 
-                for cliente in clientes:
-                    bloco_cliente = bloco_categoria[bloco_categoria["cliente_base"] == cliente]
-                    total_proc_cliente = len(bloco_cliente)
-                    total_itens_cliente = int(bloco_cliente["qtd_itens"].fillna(0).sum())
-                    fabricas_cliente = bloco_cliente["fabrica"].dropna().unique().tolist()
+            _bloco_nav = processos_s5[processos_s5["cliente_base"] == _s5_nav]
+            _fab_nav_list = _bloco_nav["fabrica"].dropna().unique().tolist()
 
-                    with st.expander(
-                        f"👤 {cliente} — {len(fabricas_cliente)} fábrica(s) | {total_proc_cliente} processo(s) | {total_itens_cliente} itens",
-                        expanded=False
-                    ):
-                        for fabrica in fabricas_cliente:
-                            bloco_fabrica = bloco_cliente[bloco_cliente["fabrica"] == fabrica]
-                            total_proc_fab = len(bloco_fabrica)
-                            total_itens_fab = int(bloco_fabrica["qtd_itens"].fillna(0).sum())
+            st.markdown(
+                f"### 👤 {_s5_nav} — "
+                f"{len(_fab_nav_list)} fábrica(s) | "
+                f"{len(_bloco_nav)} processo(s) | "
+                f"{int(_bloco_nav['qtd_itens'].fillna(0).sum())} itens"
+            )
 
-                            with st.expander(
-                                f"🏭 {fabrica} — {total_proc_fab} processo(s) | {total_itens_fab} itens",
-                                expanded=False
-                            ):
-                            
-                                for _, proc in bloco_fabrica.iterrows():
-                                    arquivo_id = int(proc["arquivo_id"])
-                                    titulo_processo = (
-                                        f"📄 {proc.get('tipo_processo', '')} | "
-                                        f"{proc.get('ip_processo', '')} | "
-                                        f"{proc.get('data_processo', '')} | "
-                                        f"{proc.get('arquivo_nome', '')} | "
-                                        f"{int(proc.get('qtd_itens', 0) or 0)} itens"
-                                    )
+            for _fab_nav in _fab_nav_list:
+                _bloco_fab_nav = _bloco_nav[_bloco_nav["fabrica"] == _fab_nav]
+                _tot_proc_nav = len(_bloco_fab_nav)
+                _tot_itens_nav = int(_bloco_fab_nav["qtd_itens"].fillna(0).sum())
 
-                                    with st.expander(titulo_processo, expanded=False):
-                                        colp1, colp2, colp3 = st.columns(3)
+                with st.expander(
+                    f"🏭 {_fab_nav} — {_tot_proc_nav} processo(s) | {_tot_itens_nav} itens",
+                    expanded=False
+                ):
+                    # Tabela resumo dos processos — sem text_input por processo
+                    _colunas_resumo = ["ip_processo", "tipo_processo", "data_processo", "qtd_itens", "arquivo_nome"]
+                    _colunas_existentes = [c for c in _colunas_resumo if c in _bloco_fab_nav.columns]
+                    st.dataframe(
+                        normalizar_df_para_exibicao(_bloco_fab_nav[_colunas_existentes].reset_index(drop=True)),
+                        use_container_width=True
+                    )
 
-                                        colp1.metric("IP", proc.get("ip_processo", ""))
-                                        colp2.metric("Tipo", proc.get("tipo_processo", ""))
-                                        colp3.metric("Itens", int(proc.get("qtd_itens", 0) or 0))
+                    # Um único selectbox para escolher qual processo inspecionar
+                    _opcoes_proc_nav = [
+                        f"{r.get('ip_processo','')} | {r.get('tipo_processo','')} | "
+                        f"{r.get('data_processo','')} ({int(r.get('qtd_itens', 0) or 0)} itens)"
+                        for _, r in _bloco_fab_nav.iterrows()
+                    ]
+                    _proc_sel_idx = st.selectbox(
+                        "Inspecionar processo",
+                        range(len(_opcoes_proc_nav)),
+                        format_func=lambda i: _opcoes_proc_nav[i],
+                        key=f"s5_proc_sel_{_fab_nav}_{_s5_nav}"
+                    )
 
-                                        st.caption(f"CE-BRI: {proc.get('ce_bri', '')}")
-                                        st.caption(f"Endereço: {proc.get('endereco_fabrica', '')}")
+                    _proc_row_nav = _bloco_fab_nav.iloc[_proc_sel_idx]
+                    _arquivo_id_nav = int(_proc_row_nav["arquivo_id"])
 
-                                        termo_item_processo = st.text_input(
-                                            "Pesquisar item dentro deste processo",
-                                            placeholder="Digite modelo, marca, descrição ou código",
-                                            key=f"pesquisar_item_processo_{arquivo_id}"
-                                        )
+                    _termo_nav = st.text_input(
+                        "Pesquisar item dentro deste processo",
+                        placeholder="modelo, marca, descrição ou código",
+                        key=f"s5_item_busca_{_arquivo_id_nav}"
+                    )
 
-                                        itens_do_processo = buscar_itens_processo_sistema5(
-                                            arquivo_id,
-                                            termo_item_processo
-                                        )
+                    _itens_nav = buscar_itens_processo_sistema5(_arquivo_id_nav, _termo_nav)
 
-                                        if itens_do_processo.empty:
-                                            st.warning("Nenhum item encontrado dentro deste processo.")
-                                        else:
-                                            st.success(f"{len(itens_do_processo)} item(ns) encontrado(s) neste processo ✅")
-                                            st.dataframe(normalizar_df_para_exibicao(itens_do_processo), use_container_width=True)
+                    if _itens_nav.empty:
+                        st.warning("Nenhum item encontrado dentro deste processo.")
+                    else:
+                        st.success(f"{len(_itens_nav)} item(ns) encontrado(s) ✅")
+                        st.dataframe(normalizar_df_para_exibicao(_itens_nav), use_container_width=True)
+                        st.download_button(
+                            "Baixar itens deste processo CSV",
+                            _itens_nav.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+                            f"sistema5_processo_{_arquivo_id_nav}.csv",
+                            "text/csv",
+                            key=f"download_itens_nav_{_arquivo_id_nav}"
+                        )
 
-                                            st.download_button(
-                                                "Baixar itens deste processo CSV",
-                                                itens_do_processo.to_csv(index=False, sep=";").encode(
-                                                    "ISO-8859-1",
-                                                    errors="replace"
-                                                ),
-                                                f"sistema5_processo_{arquivo_id}.csv",
-                                                "text/csv",
-                                                key=f"download_itens_processo_{arquivo_id}"
-                                            )
-
-                                        st.divider()
-                                        confirmar_del_proc = st.checkbox(
-                                            f"Confirmo que quero remover permanentemente este processo e seus {int(proc.get('qtd_itens', 0) or 0)} itens",
-                                            key=f"confirmar_del_proc_{arquivo_id}"
-                                        )
-                                        if confirmar_del_proc:
-                                            if st.button(
-                                                "🗑️ Deletar processo",
-                                                key=f"btn_del_proc_{arquivo_id}"
-                                            ):
-                                                try:
-                                                    qtd_del = deletar_processo_sistema5(arquivo_id)
-                                                    st.success(f"Processo {proc.get('ip_processo', '')} removido. {qtd_del} itens deletados ✅")
-                                                    st.cache_data.clear()
-                                                    st.rerun()
-                                                except Exception as e:
-                                                    st.error(f"Erro ao deletar: {e}")
-
-                                # --- Excluir todos os processos desta fábrica ---
-                                st.divider()
-                                _key_fab_del = f"{cliente}_{fabrica}".replace(" ", "_")
-                                confirmar_del_fab = st.checkbox(
-                                    f"Confirmo que quero excluir todos os {total_proc_fab} processo(s) e {total_itens_fab} itens de {fabrica}",
-                                    key=f"confirmar_del_fab_{_key_fab_del}"
+                    # --- Deletar processo individual ---
+                    st.divider()
+                    _confirmar_del_nav = st.checkbox(
+                        f"Confirmo que quero remover permanentemente este processo e seus "
+                        f"{int(_proc_row_nav.get('qtd_itens', 0) or 0)} itens",
+                        key=f"confirmar_del_nav_{_arquivo_id_nav}"
+                    )
+                    if _confirmar_del_nav:
+                        if st.button("🗑️ Deletar processo", key=f"btn_del_nav_{_arquivo_id_nav}"):
+                            try:
+                                qtd_del = deletar_processo_sistema5(_arquivo_id_nav)
+                                st.success(
+                                    f"Processo {_proc_row_nav.get('ip_processo', '')} removido. "
+                                    f"{qtd_del} itens deletados ✅"
                                 )
-                                if confirmar_del_fab:
-                                    if st.button(
-                                        f"🗑️ Excluir todos os processos de {fabrica}",
-                                        key=f"btn_del_fab_{_key_fab_del}"
-                                    ):
-                                        try:
-                                            ids_fab = [int(aid) for aid in bloco_fabrica["arquivo_id"].tolist()]
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao deletar: {e}")
 
-                                            # Delete em batch — um único commit no final
-                                            placeholders = ",".join("?" * len(ids_fab))
-                                            total_del_itens = cursor.execute(
-                                                f"SELECT COUNT(*) FROM sistema5_itens WHERE arquivo_id IN ({placeholders})",
-                                                ids_fab
-                                            ).fetchone()[0]
-                                            cursor.execute(
-                                                f"DELETE FROM sistema5_itens WHERE arquivo_id IN ({placeholders})",
-                                                ids_fab
-                                            )
-                                            cursor.execute(
-                                                f"DELETE FROM sistema5_arquivos WHERE id IN ({placeholders})",
-                                                ids_fab
-                                            )
-                                            commit_seguro()
+                    # --- Excluir todos os processos desta fábrica ---
+                    st.divider()
+                    _key_fab_del_nav = f"{_s5_nav}_{_fab_nav}".replace(" ", "_")
+                    _confirmar_del_fab_nav = st.checkbox(
+                        f"Confirmo que quero excluir todos os {_tot_proc_nav} processo(s) "
+                        f"e {_tot_itens_nav} itens de {_fab_nav}",
+                        key=f"confirmar_del_fab_nav_{_key_fab_del_nav}"
+                    )
+                    if _confirmar_del_fab_nav:
+                        if st.button(
+                            f"🗑️ Excluir todos os processos de {_fab_nav}",
+                            key=f"btn_del_fab_nav_{_key_fab_del_nav}"
+                        ):
+                            try:
+                                ids_fab_nav = [int(aid) for aid in _bloco_fab_nav["arquivo_id"].tolist()]
+                                _ph_nav = ",".join("?" * len(ids_fab_nav))
+                                _total_del_nav = cursor.execute(
+                                    f"SELECT COUNT(*) FROM sistema5_itens WHERE arquivo_id IN ({_ph_nav})",
+                                    ids_fab_nav
+                                ).fetchone()[0]
+                                cursor.execute(
+                                    f"DELETE FROM sistema5_itens WHERE arquivo_id IN ({_ph_nav})",
+                                    ids_fab_nav
+                                )
+                                cursor.execute(
+                                    f"DELETE FROM sistema5_arquivos WHERE id IN ({_ph_nav})",
+                                    ids_fab_nav
+                                )
+                                commit_seguro()
+                                st.success(
+                                    f"✅ {len(ids_fab_nav)} processo(s) e {_total_del_nav} itens de "
+                                    f"**{_fab_nav}** excluídos com sucesso."
+                                )
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao excluir: {e}")
 
-                                            st.success(
-                                                f"✅ {len(ids_fab)} processo(s) e {total_del_itens} itens de "
-                                                f"**{fabrica}** excluídos com sucesso."
-                                            )
-                                            st.cache_data.clear()
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Erro ao excluir: {e}")
-                                            st.error(f"Erro ao excluir: {e}")
+            st.download_button(
+                f"Baixar resumo de {_s5_nav} CSV",
+                _bloco_nav.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+                f"sistema5_{_s5_nav}.csv",
+                "text/csv",
+                key="download_sistema5_detalhe_csv"
+            )
 
-        st.download_button(
-            "Baixar resumo Sistema 5 CSV",
-            processos_s5.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
-            "sistema5_resumo.csv",
-            "text/csv",
-            key="download_sistema5_resumo"
-        )
+        else:
+            # ========== VISÃO GERAL: lista de clientes por categoria ==========
+            # Apenas resumos — nenhum text_input ou SQL por processo nesta view.
+            categorias = processos_s5["categoria"].dropna().unique().tolist()
+
+            for _cat in categorias:
+                with st.expander(f"📁 {_cat}", expanded=True):
+                    _bloco_cat = processos_s5[processos_s5["categoria"] == _cat]
+                    _clientes_cat = _bloco_cat["cliente_base"].dropna().unique().tolist()
+
+                    for _cli in _clientes_cat:
+                        _bloco_cli = _bloco_cat[_bloco_cat["cliente_base"] == _cli]
+                        _tot_proc_cli = len(_bloco_cli)
+                        _tot_itens_cli = int(_bloco_cli["qtd_itens"].fillna(0).sum())
+                        _fabs_cli = _bloco_cli["fabrica"].dropna().unique().tolist()
+
+                        _col_cli1, _col_cli2 = st.columns([6, 1])
+                        _col_cli1.markdown(
+                            f"**👤 {_cli}** — {len(_fabs_cli)} fábrica(s) | "
+                            f"{_tot_proc_cli} processo(s) | {_tot_itens_cli} itens"
+                        )
+                        if _col_cli2.button("Ver →", key=f"s5_nav_btn_{_cat}_{_cli}"):
+                            st.session_state["s5_nav_cliente"] = _cli
+                            st.rerun()
+
+            st.download_button(
+                "Baixar resumo Sistema 5 CSV",
+                processos_s5.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+                "sistema5_resumo.csv",
+                "text/csv",
+                key="download_sistema5_resumo"
+            )
 
 
 
