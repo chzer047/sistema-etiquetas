@@ -3528,9 +3528,9 @@ def preencher_idade_no_texto(texto, idade_formatada):
 
 
 def detectar_idade_do_nome(nome):
-    """Detecta a idade (indicativo/restritivo) a partir do NOME do produto no Excel.
-    Retorna dict: {'numero': int, 'unidade': 'ANOS'/'MESES', 'tipo': 'indicativo'/'restritivo'}
-    ou None se não achar. Prioriza o INDICATIVO (que é o que vai no texto de idade)."""
+    """Detecta o INDICATIVO a partir do NOME do produto no Excel.
+    Retorna dict: {'numero': int, 'unidade': 'ANOS'/'MESES', 'tipo': 'indicativo'}
+    ou None se não achar."""
     if not nome:
         return None
     nome_upper = str(nome).upper()
@@ -3541,6 +3541,25 @@ def detectar_idade_do_nome(nome):
     if ind:
         unidade = "MESES" if "MES" in ind.group(2) or "MÊS" in ind.group(2) else "ANOS"
         return {"numero": int(ind.group(1)), "unidade": unidade, "tipo": "indicativo"}
+
+    return None
+
+
+def detectar_restritivo_do_nome(nome):
+    """Detecta o RESTRITIVO a partir do NOME do produto no Excel.
+    Retorna dict: {'numero': int, 'unidade': 'ANOS'/'MESES', 'tipo': 'restritivo'}
+    ou None se não houver RESTRITIVO explícito no nome."""
+    if not nome:
+        return None
+    nome_upper = str(nome).upper()
+
+    # Busca explícita: 'RESTRITIVO -3ANOS', 'RESTRITIVO -3 ANOS', 'RESTRIÇÃO -3ANOS'
+    rest = re.search(r'RESTRIT\w*\s*-\s*(\d+)\s*(ANOS?|MESES?|M[ÊE]S)', nome_upper)
+    if not rest:
+        rest = re.search(r'RESTRI[ÇC][ÃA]O\s*-\s*(\d+)\s*(ANOS?|MESES?|M[ÊE]S)', nome_upper)
+    if rest:
+        unidade = "MESES" if "MES" in rest.group(2) or "MÊS" in rest.group(2) else "ANOS"
+        return {"numero": int(rest.group(1)), "unidade": unidade, "tipo": "restritivo"}
 
     return None
 
@@ -5060,12 +5079,16 @@ CATEGORIAS_POR_TIPO_ETIQUETA = {
 }
 
 
-def _montar_textos_direita(tipo, idade_formatada, titulos_escolhidos, textos_por_chave):
+def _montar_textos_direita(tipo, idade_formatada, titulos_escolhidos, textos_por_chave, idade_restritivo_fmt=None):
     """Monta a lista de blocos de texto do lado direito conforme o tipo de etiqueta.
     titulos_escolhidos: dict {categoria: titulo} com o texto escolhido pelo usuário
     pra esse item, em cada categoria aplicável ao tipo (None/'' pra pular a categoria).
     textos_por_chave: dict {(tipo, categoria, titulo): conteudo}, pré-montado a partir
-    de listar_textos_etiqueta(). Preenche {IDADE} automaticamente."""
+    de listar_textos_etiqueta(). Preenche {IDADE} automaticamente.
+    idade_restritivo_fmt: se informado, substitui {IDADE} em ATENÇÃO (restritivo).
+    idade_formatada: substitui {IDADE} nas demais categorias (indicativo)."""
+    # Categorias que usam a idade RESTRITIVA no {IDADE}
+    _CATS_RESTRITIVO = {"ATENÇÃO", "ATENCAO"}
     blocos = []
     for categoria in CATEGORIAS_POR_TIPO_ETIQUETA.get(tipo, []):
         titulo = (titulos_escolhidos or {}).get(categoria)
@@ -5073,7 +5096,10 @@ def _montar_textos_direita(tipo, idade_formatada, titulos_escolhidos, textos_por
             continue
         conteudo = textos_por_chave.get((tipo, categoria, titulo))
         if conteudo:
-            blocos.append(preencher_idade_no_texto(conteudo, idade_formatada))
+            if categoria.upper() in _CATS_RESTRITIVO and idade_restritivo_fmt:
+                blocos.append(preencher_idade_no_texto(conteudo, idade_restritivo_fmt))
+            else:
+                blocos.append(preencher_idade_no_texto(conteudo, idade_formatada))
 
     # fallback: se não houver textos escolhidos/cadastrados, avisa no próprio bloco
     if not blocos:
@@ -6099,7 +6125,9 @@ def _gerar_lote_etiquetas(itens_config, cliente, origem, solicitante_cnpj, data_
         else:
             chorao_para_esse = None
 
-        textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave)
+        _rest_det = detectar_restritivo_do_nome(item.get('nome', ''))
+        _restritivo_fmt = formatar_idade(_rest_det['numero'], _rest_det['unidade']) if _rest_det else None
+        textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave, _restritivo_fmt)
 
         dados = {
             'solicitante_cnpj': solicitante_cnpj or None,
@@ -6335,7 +6363,9 @@ def _gerar_lote_rotulagem(itens_config, origem, data_fab, lote,
         else:
             chorao_para_esse = None
 
-        textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave)
+        _rest_det = detectar_restritivo_do_nome(item.get('nome', ''))
+        _restritivo_fmt = formatar_idade(_rest_det['numero'], _rest_det['unidade']) if _rest_det else None
+        textos_dir = _montar_textos_direita(cfg['tipo'], idade_fmt, cfg.get('titulos_texto', {}), textos_por_chave, _restritivo_fmt)
 
         dados = {
             'solicitante_razao': solicitante.get('razao_social') if solicitante else None,
