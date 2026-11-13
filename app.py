@@ -15693,8 +15693,341 @@ if _is_active("gerar_descricoes"):
 
     st.divider()
 
-    # ---- Upload do arquivo ----
-    st.subheader("1. Arquivo de medidas e quantidades")
+    # ===== MODO FOTO: produto único =====
+    st.subheader("📸 Descrever por Foto")
+    st.caption(
+        "Envie uma foto do produto. O sistema pesquisa no banco de dados, identifica o tipo, "
+        "descobre a fábrica/família e gera a descrição no padrão INMETRO. Dimensões: informe manualmente."
+    )
+
+    _col_foto_up, _col_foto_opts = st.columns([1, 1])
+    with _col_foto_up:
+        _foto_unica_gd = st.file_uploader(
+            "Foto do produto (JPG, PNG, WEBP)",
+            type=["jpg", "jpeg", "png", "webp", "bmp"],
+            key="gd_foto_unica_up"
+        )
+    with _col_foto_opts:
+        _dims_foto_gd = st.text_input(
+            "📏 Medidas (ex: 30X20X10CM)",
+            key="gd_dims_foto_manual",
+            placeholder="30X20X10CM",
+            help="Informe as dimensões exatas do produto. Exemplo: 30X20X10CM ou 15X15X15CM"
+        )
+        _qtd_foto_gd = st.text_input(
+            "🧩 Qtd de peças (vazio = 1)",
+            key="gd_qtd_foto_manual",
+            placeholder="1",
+            help="Total de peças no conjunto. Deixe vazio se for produto unitário."
+        )
+
+    if _foto_unica_gd:
+        _foto_bytes_gd = _foto_unica_gd.read()
+
+        _colf_prev, _colf_res = st.columns([1, 2])
+        with _colf_prev:
+            st.image(_foto_bytes_gd, caption="Foto enviada", width=220)
+
+        with _colf_res:
+            if not _api_key_gd:
+                st.warning("⚠️ Configure a chave API Claude (campo acima) para gerar a descrição.")
+            else:
+                _foto_key_cache = f"gd_foto_{hash(_foto_bytes_gd)}_{_dims_foto_gd}_{_qtd_foto_gd}"
+
+                _btn_gerar_foto = st.button("🚀 Gerar Descrição", key="btn_gerar_foto_unica", type="primary")
+
+                if _btn_gerar_foto:
+                    st.session_state.pop(_foto_key_cache, None)
+
+                if _btn_gerar_foto or st.session_state.get(_foto_key_cache):
+                    if not st.session_state.get(_foto_key_cache):
+                        with st.spinner("Analisando foto e consultando banco de dados…"):
+
+                            _FAIXA_RULES_FT = [
+                                (['CHOCALHO'],             '+18 MESES', None),
+                                (['MORDEDOR'],             '+0 MESES',  None),
+                                (['PELÚCIA'],              '+0 MESES',  None),
+                                (['PELUCIA'],              '+0 MESES',  None),
+                                (['BEBÊ'],                 '+0 MESES',  None),
+                                (['BEBE'],                 '+0 MESES',  None),
+                                (['APERTAR'],              '+18 MESES', '-3 ANOS'),
+                                (['BOLA', 'GIRAT'],        '+3 ANOS',   '-3 ANOS'),
+                                (['BOLA', 'INTERATIV'],    '+3 ANOS',   '-3 ANOS'),
+                                (['BOLA', 'SALTIT'],       '+18 MESES', None),
+                                (['BOLA'],                 '+3 ANOS',   None),
+                                (['PIÃO', 'GIRATORI'],     '+3 ANOS',   '-3 ANOS'),
+                                (['PIAO', 'GIRATORI'],     '+3 ANOS',   '-3 ANOS'),
+                                (['PIÃO'],                 '+3 ANOS',   '-3 ANOS'),
+                                (['PIAO'],                 '+3 ANOS',   '-3 ANOS'),
+                                (['BEYBLADE'],             '+6 ANOS',   '-3 ANOS'),
+                                (['FIDGET', 'SPINNER'],    '+6 ANOS',   '-3 ANOS'),
+                                (['CUBO', 'MÁGICO'],       '+6 ANOS',   '-3 ANOS'),
+                                (['CUBO', 'MAGICO'],       '+6 ANOS',   '-3 ANOS'),
+                                (['VARINHA', 'MÁGICA'],    '+3 ANOS',   '-3 ANOS'),
+                                (['VARINHA', 'MAGICA'],    '+3 ANOS',   '-3 ANOS'),
+                                (['VARINHA'],              '+3 ANOS',   '-3 ANOS'),
+                                (['PISTOLA', 'ÁGUA'],      '+3 ANOS',   '-3 ANOS'),
+                                (['PISTOLA', 'AGUA'],      '+3 ANOS',   '-3 ANOS'),
+                                (['PISTOLA', 'BOLHA'],     '+3 ANOS',   '-3 ANOS'),
+                                (['PISTOLA'],              '+6 ANOS',   '-3 ANOS'),
+                                (['ESPADA'],               '+3 ANOS',   '-3 ANOS'),
+                                (['BONECA'],               '+3 ANOS',   '-3 ANOS'),
+                                (['FIGURA', 'AÇÃO'],       '+3 ANOS',   '-3 ANOS'),
+                                (['FIGURA', 'ACAO'],       '+3 ANOS',   '-3 ANOS'),
+                                (['CONTROLE', 'REMOTO'],   '+6 ANOS',   '-3 ANOS'),
+                                (['CARRINHO'],             '+3 ANOS',   '-3 ANOS'),
+                                (['VEÍCULO'],              '+3 ANOS',   '-3 ANOS'),
+                                (['VEICULO'],              '+3 ANOS',   '-3 ANOS'),
+                                (['MAQUIAGEM'],            '+3 ANOS',   '-3 ANOS'),
+                                (['ESMALTE'],              '+6 ANOS',   '-3 ANOS'),
+                                (['DARDO'],                '+6 ANOS',   '-6 ANOS'),
+                                (['NERF'],                 '+6 ANOS',   '-3 ANOS'),
+                                (['BRINQUEDO'],            '+3 ANOS',   '-3 ANOS'),
+                            ]
+
+                            def _det_faixa_ft(_tipo):
+                                _t = (_tipo or '').upper()
+                                for _ps, _ind, _res in _FAIXA_RULES_FT:
+                                    if all(p in _t for p in _ps):
+                                        return _ind, _res
+                                return '+3 ANOS', '-3 ANOS'
+
+                            def _abrev_ft(_desc, _max=200):
+                                if len(_desc) <= _max:
+                                    return _desc
+                                _d = _desc
+                                for _ov, _nv in [
+                                    ('INDICATIVO', 'IND.'), ('RESTRITIVO', 'REST.'),
+                                    ('PRODUZIDO', 'PROD.'), ('ANOS', 'A'),
+                                    ('MESES', 'MES.'), ('PLÁSTICO', 'PLAST.'),
+                                    ('PLASTICO', 'PLAST.'), ('CONTROLE', 'CONT.'),
+                                    ('REMOTO', 'REM.'), ('VELOCIDADE', 'VEL.'),
+                                    ('MEDIDAS', 'MED.'),
+                                ]:
+                                    _d = _re_gd.sub(r'\b' + _ov + r'\b', _nv, _d, flags=_re_gd.IGNORECASE)
+                                return _d[:_max].rstrip(',; ') if len(_d) > _max else _d
+
+                            def _buscar_exemplos_ft(_tipo, _n=25):
+                                _exs_ft = []
+                                if _tipo:
+                                    _pals_ft = [p for p in _tipo.upper().split() if len(p) > 3]
+                                    if _pals_ft:
+                                        for _np_ft in range(min(len(_pals_ft), 3), 0, -1):
+                                            _cond_ft = ' AND '.join(
+                                                f"UPPER(nome) LIKE '%{p}%'" for p in _pals_ft[:_np_ft]
+                                            )
+                                            try:
+                                                _q_ft = pd.read_sql_query(
+                                                    f"SELECT DISTINCT UPPER(TRIM(nome)) AS n "
+                                                    f"FROM sistema5_itens "
+                                                    f"WHERE nome IS NOT NULL AND LENGTH(TRIM(nome))>20 "
+                                                    f"AND ({_cond_ft}) ORDER BY RANDOM() LIMIT 20",
+                                                    conn
+                                                )['n'].tolist()
+                                                _exs_ft.extend(_q_ft)
+                                                if len(_exs_ft) >= 15:
+                                                    break
+                                            except Exception:
+                                                pass
+                                try:
+                                    _q2_ft = pd.read_sql_query(
+                                        "SELECT DISTINCT UPPER(TRIM(nome)) AS n FROM sistema5_itens "
+                                        "WHERE nome IS NOT NULL AND LENGTH(TRIM(nome))>30 "
+                                        "AND UPPER(nome) LIKE '%MEDIDAS%' AND UPPER(nome) LIKE '%ANOS%' "
+                                        "ORDER BY RANDOM() LIMIT 15", conn
+                                    )['n'].tolist()
+                                    _exs_ft = list(dict.fromkeys(_exs_ft + _q2_ft))
+                                except Exception:
+                                    pass
+                                return _exs_ft[:_n]
+
+                            def _buscar_fab_fam_ft(_tipo):
+                                if not _tipo:
+                                    return '', ''
+                                _pals_ff = [p for p in _tipo.upper().split() if len(p) > 3]
+                                if not _pals_ff:
+                                    return '', ''
+                                _cond_ff = ' AND '.join(
+                                    f"UPPER(nome) LIKE '%{p}%'" for p in _pals_ff[:2]
+                                )
+                                try:
+                                    _q_ff = pd.read_sql_query(
+                                        f"SELECT fabrica, familia, COUNT(*) AS cnt "
+                                        f"FROM sistema5_itens "
+                                        f"WHERE nome IS NOT NULL AND ({_cond_ff}) "
+                                        f"AND fabrica IS NOT NULL AND TRIM(fabrica) != '' "
+                                        f"GROUP BY fabrica, familia ORDER BY cnt DESC LIMIT 5",
+                                        conn
+                                    )
+                                    if not _q_ff.empty:
+                                        return (
+                                            str(_q_ff.iloc[0]['fabrica'] or ''),
+                                            str(_q_ff.iloc[0]['familia'] or '')
+                                        )
+                                except Exception:
+                                    pass
+                                return '', ''
+
+                            def _claude_tipo_ft(_img_bytes, _api_key):
+                                try:
+                                    import anthropic as _ant_ft
+                                    import base64 as _b64_ft
+                                    _client_ft = _ant_ft.Anthropic(api_key=_api_key)
+                                    _b6_ft = _b64_ft.b64encode(_img_bytes).decode()
+                                    _mt_ft = "image/png" if _img_bytes[:4] == b'\x89PNG' else "image/jpeg"
+                                    _prompt_ft = (
+                                        "Analise a imagem e identifique o tipo EXATO do produto brinquedo.\n"
+                                        "Responda APENAS com o tipo em PORTUGUÊS BRASILEIRO, MAIÚSCULAS, máximo 5 palavras.\n\n"
+                                        "DISTINÇÕES CRÍTICAS:\n"
+                                        "  PIÃO = brinquedo que GIRA SOBRE UMA PONTA no chão — qualquer formato de corpo\n"
+                                        "  BOLA GIRATÓRIA = bola que se APERTA COM A MÃO, sem ponta para girar no chão\n"
+                                        "  FIDGET SPINNER = disco PLANO com rolamentos nas aletas\n"
+                                        "  VARINHA MAGICA = bastão longo (sem fantasia/saia a menos que apareça)\n"
+                                        "  PISTOLA DE BOLHA = pistola que sopra bolhas de sabão\n\n"
+                                        "EXEMPLOS: PIÃO GIRATÓRIO, BOLA GIRATÓRIA DINOSSAURO, VARINHA MAGICA LUMINOSA, "
+                                        "CARRINHO CONTROLE REMOTO, PISTOLA DE AGUA, BONECA, CUBO MAGICO, "
+                                        "BRINQUEDO ANIMAL DE APERTAR\n\n"
+                                        "Responda SOMENTE o tipo, sem mais nada."
+                                    )
+                                    _r_ft = _client_ft.messages.create(
+                                        model="claude-sonnet-4-6",
+                                        max_tokens=20,
+                                        messages=[{"role": "user", "content": [
+                                            {"type": "image", "source": {
+                                                "type": "base64", "media_type": _mt_ft, "data": _b6_ft}},
+                                            {"type": "text", "text": _prompt_ft}
+                                        ]}]
+                                    )
+                                    _t_ft = _r_ft.content[0].text.strip().upper()
+                                    for _ov_ft, _nv_ft in [
+                                        ('PEONZA', 'PIÃO'), ('TROMPO', 'PIÃO'), ('SPINNING TOP', 'PIÃO GIRATÓRIO')
+                                    ]:
+                                        _t_ft = _t_ft.replace(_ov_ft, _nv_ft)
+                                    return _t_ft
+                                except Exception:
+                                    return ''
+
+                            def _claude_gerar_ft(_img_bytes, _tipo, _dims, _qtd, _exemplos, _fabrica, _familia, _api_key):
+                                try:
+                                    import anthropic as _ant_gt
+                                    import base64 as _b64_gt
+                                    _client_gt = _ant_gt.Anthropic(api_key=_api_key)
+                                    _b6_gt = _b64_gt.b64encode(_img_bytes).decode()
+                                    _mt_gt = "image/png" if _img_bytes[:4] == b'\x89PNG' else "image/jpeg"
+                                    _exs_txt_gt = '\n'.join(
+                                        f'  {_ii+1}. {_ee}' for _ii, _ee in enumerate(_exemplos[:25])
+                                    )
+                                    _ind_gt, _res_gt = _det_faixa_ft(_tipo)
+                                    _fab_hint_gt = f"Fabricante no banco: {_fabrica}\n" if _fabrica else ""
+                                    _fam_hint_gt = f"Família no banco: {_familia}\n" if _familia else ""
+                                    _prompt_gt = (
+                                        "Você é especialista em certificação INMETRO Brasil (Portaria 302/2021).\n\n"
+                                        "═══ BANCO DE DADOS — ESTUDE ESTE PADRÃO EXATO ═══\n"
+                                        + _exs_txt_gt +
+                                        "\n\n═══ PRODUTO A DESCREVER ═══\n"
+                                        f"Tipo identificado: {_tipo or 'BRINQUEDO'}\n"
+                                        f"Medidas: {_dims or 'VERIFICAR'}\n"
+                                        f"Quantidade de peças: {_qtd or '1'}\n"
+                                        + _fab_hint_gt + _fam_hint_gt +
+                                        "\n═══ FAIXA ETÁRIA (Portaria 302/2021) ═══\n"
+                                        f"INDICATIVO sugerido: {_ind_gt}\n"
+                                        + (f"RESTRITIVO sugerido: {_res_gt}\n" if _res_gt else "RESTRITIVO: não obrigatório\n") +
+                                        "\n═══ REGRAS OBRIGATÓRIAS ═══\n"
+                                        "1. TUDO MAIÚSCULAS, PORTUGUÊS BRASILEIRO\n"
+                                        "   PIÃO (nunca PEONZA/TROMPO), BONECA (nunca DOLL), VARINHA (nunca WAND)\n"
+                                        "2. Descreva SOMENTE o produto principal visível na imagem\n"
+                                        f"3. Inclua: MEDIDAS {_dims or 'VERIFICAR'}\n"
+                                        "4. Inclua: MECANISMO [A PILHA / A CORDA / MANUAL / ELETRÔNICO / PRESSÃO]\n"
+                                        "5. Se houver mais de 1 peça: inclua C/ [N] PEÇAS\n"
+                                        f"6. Inclua: INDICATIVO {_ind_gt}\n"
+                                        + (f"7. Inclua: RESTRITIVO {_res_gt}\n" if _res_gt else "7. Omita RESTRITIVO\n") +
+                                        "8. Material: DE PLÁSTICO / DE METAL / DE MADEIRA\n"
+                                        "9. Siga a estrutura dos exemplos acima EXATAMENTE\n"
+                                        "10. MÁXIMO 200 CARACTERES\n"
+                                        "    Abreviações: IND. REST. PROD. A MES. INJ. PLAST. CONT. REM. VEL. MED.\n\n"
+                                        "Retorne APENAS a descrição técnica, sem explicações, sem aspas."
+                                    )
+                                    _r_gt = _client_gt.messages.create(
+                                        model="claude-sonnet-4-6",
+                                        max_tokens=400,
+                                        messages=[{"role": "user", "content": [
+                                            {"type": "image", "source": {
+                                                "type": "base64", "media_type": _mt_gt, "data": _b6_gt}},
+                                            {"type": "text", "text": _prompt_gt}
+                                        ]}]
+                                    )
+                                    _d_gt = _r_gt.content[0].text.strip().upper()
+                                    for _ov_gt, _nv_gt in [('PEONZA', 'PIÃO'), ('PIAO ', 'PIÃO '), ('TROMPO', 'PIÃO')]:
+                                        _d_gt = _d_gt.replace(_ov_gt, _nv_gt)
+                                    return _abrev_ft(_d_gt)
+                                except Exception as _e_gt:
+                                    return f'[ERRO: {_e_gt}]'
+
+                            # --- Executar pipeline ---
+                            _tipo_ft_res  = _claude_tipo_ft(_foto_bytes_gd, _api_key_gd)
+                            _exs_ft_res   = _buscar_exemplos_ft(_tipo_ft_res, 25)
+                            _fab_ft_res, _fam_ft_res = _buscar_fab_fam_ft(_tipo_ft_res)
+                            _desc_ft_res  = _claude_gerar_ft(
+                                _foto_bytes_gd,
+                                _tipo_ft_res,
+                                _dims_foto_gd.strip().upper() if _dims_foto_gd else '',
+                                _qtd_foto_gd.strip() if _qtd_foto_gd else '1',
+                                _exs_ft_res,
+                                _fab_ft_res,
+                                _fam_ft_res,
+                                _api_key_gd
+                            )
+                            st.session_state[_foto_key_cache] = {
+                                'tipo':     _tipo_ft_res,
+                                'desc':     _desc_ft_res,
+                                'fabrica':  _fab_ft_res,
+                                'familia':  _fam_ft_res,
+                                'exemplos': _exs_ft_res,
+                            }
+
+                    _res_ft = st.session_state.get(_foto_key_cache)
+                    if _res_ft and isinstance(_res_ft, dict):
+                        st.success("✅ Descrição gerada!")
+
+                        _mc_ft1, _mc_ft2, _mc_ft3 = st.columns(3)
+                        _mc_ft1.metric("Tipo identificado", _res_ft.get('tipo', '—'))
+                        _mc_ft2.metric("Fabricante sugerido", _res_ft.get('fabrica', '—') or '—')
+                        _mc_ft3.metric("Família sugerida", _res_ft.get('familia', '—') or '—')
+
+                        _desc_ft_edit = st.text_area(
+                            "📝 Descrição gerada (editável):",
+                            value=_res_ft.get('desc', ''),
+                            height=100,
+                            key="gd_foto_desc_editavel",
+                            help="Máximo 200 caracteres. Edite se necessário antes de copiar."
+                        )
+                        _chars_ft = len(_desc_ft_edit or '')
+                        if _chars_ft > 200:
+                            st.error(f"❌ {_chars_ft} caracteres — acima do limite de 200! Reduza a descrição.")
+                        elif _chars_ft > 180:
+                            st.warning(f"⚠️ {_chars_ft}/200 caracteres — próximo do limite.")
+                        else:
+                            st.caption(f"✅ {_chars_ft}/200 caracteres")
+
+                        _col_fab_ft, _col_fam_ft = st.columns(2)
+                        with _col_fab_ft:
+                            st.text_input("🏭 Fabricante (editar se necessário):",
+                                          value=_res_ft.get('fabrica', ''), key="gd_fab_ft_edit")
+                        with _col_fam_ft:
+                            st.text_input("🏷️ Família (editar se necessário):",
+                                          value=_res_ft.get('familia', ''), key="gd_fam_ft_edit")
+
+                        _n_exs_ft = len(_res_ft.get('exemplos', []))
+                        with st.expander(f"📚 {_n_exs_ft} exemplos do banco usados na geração", expanded=False):
+                            for _i_ex_ft, _ex_ft in enumerate(_res_ft.get('exemplos', []), 1):
+                                st.code(f"{_i_ex_ft:02d}. {_ex_ft}", language=None)
+
+                        st.caption("💡 Use Ctrl+A na caixa de descrição para selecionar e copiar tudo.")
+
+    st.divider()
+
+    # ---- Upload do arquivo (modo planilha) ----
+    st.subheader("📊 Modo Planilha — Processar Lote")
     st.caption(
         "Envie o Excel com células **azuis** como cabeçalho (REF, MEDIDAS, FOTO DO PRODUTO, DESCRIÇÃO). "
         "A coluna DESCRIÇÃO (células amarelas) será preenchida e o arquivo retornado completo."
