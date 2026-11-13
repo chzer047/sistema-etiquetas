@@ -12690,6 +12690,7 @@ if _is_active("etiquetas"):
                         'fabrica':    col(row, "FABRICA"),
                         'familia':    col(row, "FAMILIA"),
                         'registro':   col(row, "REGISTRO"),
+                        'quantidade': col(row, "QUANTIDADE") or col(row, "PEÇAS") or col(row, "PECAS"),
                     }
                 return itens
 
@@ -13255,6 +13256,14 @@ if _is_active("etiquetas"):
                 m = _re.search(r'MENORES DE\s+0?(\d+)\s*(ANOS?|MESES?)?', texto, _re.IGNORECASE)
                 restritivo = f"{m.group(1)} {(m.group(2) or 'ANOS').upper()}" if m else None
 
+                # Quantidade de peças (ex: "1 Unidade" ou "1 Conjunto c/ 03 Peças")
+                m = _re.search(r'1\s+Conjunto\s+c/\s*(\d+)\s+Pe[çc]as?', texto, _re.IGNORECASE)
+                if m:
+                    quantidade_etiq = int(m.group(1))
+                else:
+                    m = _re.search(r'1\s+Unidade', texto, _re.IGNORECASE)
+                    quantidade_etiq = 1 if m else None
+
                 # ---- Processar imagens desta etiqueta ----
                 tem_chorao = False
                 tem_pilha = False
@@ -13611,6 +13620,7 @@ if _is_active("etiquetas"):
                     'data_fabricacao': data_fabricacao,
                     'data_fabricacao_mes': data_fabricacao_mes,
                     'data_fabricacao_ano': data_fabricacao_ano,
+                    'quantidade': quantidade_etiq,
                 }
 
             # ---- Extrair indicativo/restritivo do NOME do Excel ----
@@ -13951,6 +13961,24 @@ if _is_active("etiquetas"):
                         )
                 # Se a etiqueta não trouxer data de fabricação, não bloqueia (não é erro,
                 # só não dá pra conferir) — fica silencioso.
+
+                # 10. Quantidade de peças (só verifica se o Excel tiver coluna QUANTIDADE)
+                _qtd_excel_raw = (item_excel.get('quantidade') or '').strip()
+                _qtd_etiq = etiq.get('quantidade')
+                if _qtd_excel_raw and _qtd_etiq is not None:
+                    try:
+                        _qtd_excel_num = int(float(_qtd_excel_raw))
+                    except (ValueError, TypeError):
+                        _qtd_excel_num = None
+                    if _qtd_excel_num is not None:
+                        _qtd_etiq_fmt = formatar_quantidade(_qtd_etiq) or str(_qtd_etiq)
+                        _qtd_excel_fmt = formatar_quantidade(_qtd_excel_num) or str(_qtd_excel_num)
+                        if _qtd_etiq == _qtd_excel_num:
+                            ok.append(f'Quantidade {_qtd_etiq_fmt} ✅')
+                        else:
+                            erros.append(
+                                f"Quantidade divergente: etiqueta='{_qtd_etiq_fmt}' | excel='{_qtd_excel_fmt}'"
+                            )
 
                 # ---- Prova real: dados brutos lado a lado para conferência manual ----
                 prova_real = {
