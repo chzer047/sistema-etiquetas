@@ -12636,16 +12636,26 @@ if _is_active("etiquetas"):
                 _CORES_CABECALHO = ("00CCFF", "00B0F0")
                 _idx_cabecalho = None
 
+                # Percorre todas as linhas azuis (podem ser 2: uma de info, outra com REFERENCIA)
+                # e fica com a última que contenha "REFERENCIA" entre seus valores.
+                # Isso suporta tanto o formato antigo (1 linha azul) quanto planilhas com
+                # cabeçalho duplo (linha de metadados em azul + linha real com REFERENCIA).
                 try:
+                    _ultimo_azul_com_ref = None
+                    _ultimo_azul_sem_ref = None
                     for _i, _linha_celulas in enumerate(ws.iter_rows(min_row=1, max_row=min(30, ws.max_row))):
-                        for _celula in _linha_celulas:
-                            _fill = _celula.fill
-                            _rgb = getattr(getattr(_fill, "fgColor", None), "rgb", None) if _fill else None
-                            if _rgb and any(c in str(_rgb).upper() for c in _CORES_CABECALHO):
-                                _idx_cabecalho = _i
-                                break
-                        if _idx_cabecalho is not None:
-                            break
+                        _tem_azul = any(
+                            (c in str(getattr(getattr(cel.fill, "fgColor", None), "rgb", "") or "").upper())
+                            for cel in _linha_celulas
+                            for c in _CORES_CABECALHO
+                        )
+                        if _tem_azul:
+                            _vals_linha = [str(cel.value).strip().upper() if cel.value else "" for cel in _linha_celulas]
+                            if any("REFERENCIA" in v for v in _vals_linha):
+                                _ultimo_azul_com_ref = _i
+                            else:
+                                _ultimo_azul_sem_ref = _i
+                    _idx_cabecalho = _ultimo_azul_com_ref if _ultimo_azul_com_ref is not None else _ultimo_azul_sem_ref
                 except Exception:
                     _idx_cabecalho = None
 
