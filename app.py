@@ -13049,6 +13049,8 @@ if _is_active("etiquetas"):
             # ---- OTIMIZAÇÃO 2: cache de OCR por conteúdo de imagem ----
             # (o mesmo selo de registro se repete em várias etiquetas -> só faz OCR uma vez)
             _ocr_cache = {}
+            import threading as _threading_conf
+            _ocr_cache_lock = _threading_conf.Lock()
 
             # ---- Corretor ortográfico (erro de escrita/digitação) ----
             _spell_disponivel = False
@@ -13337,10 +13339,12 @@ if _is_active("etiquetas"):
                                     if registro is None and w > 120 and h > 80 and _ocr_disponivel:
                                         import hashlib as _hashlib2
                                         _cache_key_ocr = _hashlib2.md5(_img_bytes).hexdigest()
-                                        _cache_hit_ocr = _cache_key_ocr in _ocr_cache
+                                        with _ocr_cache_lock:
+                                            _cache_hit_ocr = _cache_key_ocr in _ocr_cache
+                                            if _cache_hit_ocr:
+                                                registro = _ocr_cache[_cache_key_ocr]
 
                                     if registro is None and w > 120 and h > 80 and _ocr_disponivel and _cache_hit_ocr:
-                                        registro = _ocr_cache[_cache_key_ocr]
                                         if debug_manual:
                                             st.caption(
                                                 f"🔎 [{referencia}] OCR {_tgt}: resultado reaproveitado do cache -> "
@@ -13530,7 +13534,8 @@ if _is_active("etiquetas"):
                                             if debug_manual:
                                                 st.warning(f"🔎 [{referencia}] erro no OCR de {_tgt}: {_e_ocr}")
 
-                                        _ocr_cache[_cache_key_ocr] = registro
+                                        with _ocr_cache_lock:
+                                            _ocr_cache[_cache_key_ocr] = registro
 
                                 except Exception:
                                     pass
@@ -13647,7 +13652,38 @@ if _is_active("etiquetas"):
 
                 word_etiqueta.seek(0)
                 doc_word = _Document(word_etiqueta)
-                etiquetas_word = [_parse_word_etiqueta(t) for t in doc_word.tables if t.rows]
+                _tables_to_parse = [t for t in doc_word.tables if t.rows]
+
+            if debug_manual or len(_tables_to_parse) <= 4:
+                # Modo debug ou lote pequeno: serial (st.caption() funciona normalmente)
+                with st.spinner("Analisando etiquetas..."):
+                    etiquetas_word = [_parse_word_etiqueta(t) for t in _tables_to_parse]
+            else:
+                # Modo normal: processa etiquetas em paralelo.
+                # Tesseract é chamado via subprocess -> libera o GIL -> ThreadPoolExecutor
+                # dá speedup real mesmo com múltiplos workers.
+                import concurrent.futures as _cf_conf
+                _n_workers = min(4, len(_tables_to_parse))
+                _barra_etiq = st.progress(0.0, text=f"Analisando etiquetas: 0 / {len(_tables_to_parse)}")
+                _resultados_futuros = {}
+                _concluidos = 0
+                etiquetas_word = [None] * len(_tables_to_parse)
+
+                with _cf_conf.ThreadPoolExecutor(max_workers=_n_workers) as _pool:
+                    _fs = {_pool.submit(_parse_word_etiqueta, t): i for i, t in enumerate(_tables_to_parse)}
+                    for _fut in _cf_conf.as_completed(_fs):
+                        _idx = _fs[_fut]
+                        try:
+                            etiquetas_word[_idx] = _fut.result()
+                        except Exception:
+                            etiquetas_word[_idx] = {}
+                        _concluidos += 1
+                        _barra_etiq.progress(
+                            _concluidos / len(_tables_to_parse),
+                            text=f"Analisando etiquetas: {_concluidos} / {len(_tables_to_parse)}"
+                        )
+                _barra_etiq.empty()
+                etiquetas_word = [e for e in etiquetas_word if e]
 
             st.info(f"📊 Excel: **{len(itens_excel)}** itens | 📄 Word: **{len(etiquetas_word)}** etiquetas")
 
