@@ -16324,21 +16324,59 @@ if _is_active("gerar_descricoes"):
             _db_sai += (', SEM RESTRIÇÃO' if _sai_rest == 'SEM RESTRIÇÃO'
                         else f', RESTRITIVO {_sai_rest}')
             st.session_state['gd_sai_resultado'] = _db_sai
+            # Buscar família/fábrica no sistema5_itens
+            try:
+                _pals_fam = [p for p in (_sai_tipo or '').upper().split() if len(p) > 3]
+                if _pals_fam:
+                    _cond_fam = ' AND '.join(
+                        f"UPPER(nome) LIKE '%{p}%'" for p in _pals_fam[:2])
+                    _df_fam = pd.read_sql_query(
+                        f"SELECT fabrica, familia, COUNT(*) AS cnt FROM sistema5_itens "
+                        f"WHERE nome IS NOT NULL AND ({_cond_fam}) AND fabrica IS NOT NULL "
+                        f"GROUP BY fabrica, familia ORDER BY cnt DESC LIMIT 5",
+                        conn
+                    )
+                    st.session_state['gd_sai_fam_sugs'] = (
+                        _df_fam.to_dict('records') if not _df_fam.empty else [])
+                else:
+                    st.session_state['gd_sai_fam_sugs'] = []
+            except Exception:
+                st.session_state['gd_sai_fam_sugs'] = []
 
     if 'gd_sai_resultado' in st.session_state:
         _res_sai = st.session_state['gd_sai_resultado']
-        _ed_sai = st.text_area(
-            f"Descrição gerada ({len(_res_sai)}/200 caracteres)",
-            value=_res_sai, height=100, max_chars=200, key="gd_sai_desc_edit"
-        )
-        _lsai = len(_ed_sai or '')
-        if _lsai > 200:
-            st.error(f"❌ {_lsai} caracteres — excede 200!")
-        elif _lsai > 180:
-            st.warning(f"⚠️ {_lsai}/200 — próximo do limite.")
-        else:
-            st.success(f"✅ {_lsai}/200 caracteres")
-        st.caption("💡 Use Ctrl+A para selecionar e copiar a descrição.")
+        _sugs_fam_sai = st.session_state.get('gd_sai_fam_sugs', [])
+
+        _resc1, _resc2 = st.columns([2, 1])
+        with _resc1:
+            _ed_sai = st.text_area(
+                f"Descrição gerada ({len(_res_sai)}/200 caracteres)",
+                value=_res_sai, height=100, max_chars=200, key="gd_sai_desc_edit"
+            )
+            _lsai = len(_ed_sai or '')
+            if _lsai > 200:
+                st.error(f"❌ {_lsai} caracteres — excede 200!")
+            elif _lsai > 180:
+                st.warning(f"⚠️ {_lsai}/200 — próximo do limite.")
+            else:
+                st.success(f"✅ {_lsai}/200 caracteres")
+            st.caption("💡 Use Ctrl+A para selecionar e copiar a descrição.")
+
+        with _resc2:
+            st.markdown("**Enquadramento sugerido:**")
+            if _sugs_fam_sai:
+                _best_sai = _sugs_fam_sai[0]
+                st.metric("🏭 Fábrica", _best_sai.get('fabrica') or '—')
+                st.metric("🏷️ Família", _best_sai.get('familia') or '—')
+                if len(_sugs_fam_sai) > 1:
+                    with st.expander(f"🔄 {len(_sugs_fam_sai) - 1} outra(s) opção(ões)", expanded=False):
+                        for _sf in _sugs_fam_sai[1:]:
+                            st.caption(
+                                f"🏭 {_sf.get('fabrica', '—')} | "
+                                f"🏷️ {_sf.get('familia', '—')} "
+                                f"({_sf.get('cnt', 0)} itens)")
+            else:
+                st.info("Nenhuma família encontrada no banco para esse tipo.")
 
     st.divider()
 
