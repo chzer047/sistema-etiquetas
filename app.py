@@ -16399,6 +16399,12 @@ if _is_active("gerar_descricoes"):
                         if _exs_show:
                             import re as _reAdapt
                             _base_ex = _exs_show[0]
+                            # Se tipo não tem CONJUNTO/KIT, remover prefixo estrutural do exemplo
+                            if not _extra_in_tipo:
+                                _base_ex = _reAdapt.sub(
+                                    r'^(BRINQUEDO\s+)?(CONJUNTO|KIT|JOGO|VARIADOS|SORTIDOS|SORTIDO)\s+',
+                                    lambda m: (m.group(1) or ''),
+                                    _base_ex, flags=_reAdapt.IGNORECASE)
                             # Substituir MEDIDAS
                             _base_ex = _reAdapt.sub(
                                 r'MEDIDAS [^,]+', f'MEDIDAS {_dims_b} CM',
@@ -16693,6 +16699,12 @@ if _is_active("gerar_descricoes"):
                                         _exs_ls = _exs_ls_sc
                                 if _exs_ls:
                                     _bex_ls = _exs_ls[0]
+                                    # Se tipo não tem CONJUNTO/KIT, remover prefixo estrutural
+                                    if not _extra_ls:
+                                        _bex_ls = _reLS.sub(
+                                            r'^(BRINQUEDO\s+)?(CONJUNTO|KIT|JOGO|VARIADOS|SORTIDOS|SORTIDO)\s+',
+                                            lambda m: (m.group(1) or ''),
+                                            _bex_ls, flags=_reLS.IGNORECASE)
                                     _bex_ls = _reLS.sub(
                                         r'MEDIDAS [^,]+', f'MEDIDAS {_dims_ls} CM',
                                         _bex_ls, flags=_reLS.IGNORECASE)
