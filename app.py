@@ -16500,14 +16500,15 @@ if _is_active("gerar_descricoes"):
             import io as _io_ls
             _arq_lote_sai.seek(0)
             _bts_ls = _arq_lote_sai.read(); _arq_lote_sai.seek(0)
-            # Auto-detectar linha do cabeçalho
+            # Auto-detectar linha do cabeçalho (procura linha com TIPO, MATERIAL, etc.)
             _hdr_row_ls = 0
             if not _arq_lote_sai.name.lower().endswith('.csv'):
-                _df_preview = pd.read_excel(_io_ls.BytesIO(_bts_ls), header=None, nrows=10)
-                for _ri in range(min(10, len(_df_preview))):
-                    _row_vals = [str(v).strip() for v in _df_preview.iloc[_ri]
+                _df_preview = pd.read_excel(_io_ls.BytesIO(_bts_ls), header=None, nrows=15)
+                _hdr_kws = {'TIPO', 'MATERIAL', 'MEDIDA', 'QTD', 'REF', 'MODELO', 'MARCA'}
+                for _ri in range(min(15, len(_df_preview))):
+                    _row_vals = [str(v).strip().upper() for v in _df_preview.iloc[_ri]
                                  if str(v).strip() not in ('', 'nan', 'None')]
-                    if len(_row_vals) >= 3:
+                    if any(any(k in rv for k in _hdr_kws) for rv in _row_vals):
                         _hdr_row_ls = _ri
                         break
             _hdr_row_ls = st.number_input(
