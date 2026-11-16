@@ -16091,6 +16091,257 @@ if _is_active("gerar_descricoes"):
 
     st.divider()
 
+    # ===== MODO SEM IA: Template Manual =====
+    st.subheader("🔍 Descrever Sem IA — Template Manual")
+    st.caption(
+        "Sem custo de API. Envie uma foto (opcional) para buscar produtos similares no banco, "
+        "preencha os campos e o sistema monta a descrição no padrão INMETRO automaticamente."
+    )
+
+    _FAIXA_RULES_SAI = [
+        (['PELÚCIA'],            '+6MESES',  None),
+        (['PELUCIA'],            '+6MESES',  None),
+        (['BEBÊ'],               '+6MESES',  None),
+        (['BEBE'],               '+6MESES',  None),
+        (['SINUCA'],             '+6ANOS',   '-3ANOS'),
+        (['BEYBLADE'],           '+6ANOS',   '-3ANOS'),
+        (['PISTOLA'],            '+6ANOS',   '-3ANOS'),
+        (['ESMALTE'],            '+6ANOS',   '-3ANOS'),
+        (['DARDO'],              '+6ANOS',   '-6ANOS'),
+        (['CONTROLE', 'REMOTO'], '+6ANOS',   '-3ANOS'),
+        (['BONECA'],             '+3ANOS',   '-3ANOS'),
+        (['CARRINHO'],           '+3ANOS',   '-3ANOS'),
+        (['MAQUIAGEM'],          '+3ANOS',   '-3ANOS'),
+        (['BRINQUEDO'],          '+3ANOS',   '-3ANOS'),
+    ]
+
+    def _det_faixa_sai(_tipo_s):
+        _t = (_tipo_s or '').upper()
+        for _ps, _ind, _res in _FAIXA_RULES_SAI:
+            if all(p in _t for p in _ps):
+                return _ind, (_res or 'SEM RESTRIÇÃO')
+        return '+3ANOS', '-3ANOS'
+
+    _sai_foto_col, _sai_info_col = st.columns([1, 2])
+
+    _foto_sai_bytes = None
+    with _sai_foto_col:
+        _foto_sai = st.file_uploader(
+            "Foto do produto (opcional)",
+            type=["jpg", "jpeg", "png", "webp", "bmp"],
+            key="gd_sai_foto_up"
+        )
+        if _foto_sai:
+            _foto_sai_bytes = _foto_sai.read()
+            st.image(_foto_sai_bytes, width=200)
+
+    _sai_similares = []
+    _sai_palavras_ocr = []
+
+    if _foto_sai_bytes:
+        _sai_ocr_ck = f"gd_sai_ocr_{hash(bytes(_foto_sai_bytes))}"
+        if _sai_ocr_ck not in st.session_state:
+            with st.spinner("Lendo texto da foto (OCR)…"):
+                try:
+                    import pytesseract as _pyts_sai
+                    from PIL import Image as _PilSai
+                    import io as _ioSai, re as _reSaiOcr
+                    _img_sai = _PilSai.open(_ioSai.BytesIO(_foto_sai_bytes))
+                    _ocr_raw_sai = _pyts_sai.image_to_string(_img_sai, lang='por+eng').upper()
+                    _STOP_SAI = {'PRODUZIDO', 'MEDIDAS', 'MECANISMO', 'INDICATIVO',
+                                 'RESTRITIVO', 'INJECAO', 'FROM', 'MADE', 'WITH', 'PARA'}
+                    _pals_sai = [w for w in _reSaiOcr.findall(r'[A-ZÀ-Ú]{4,}', _ocr_raw_sai)
+                                 if w not in _STOP_SAI]
+                    st.session_state[_sai_ocr_ck] = list(dict.fromkeys(_pals_sai))[:8]
+                except Exception:
+                    st.session_state[_sai_ocr_ck] = []
+        _sai_palavras_ocr = st.session_state.get(_sai_ocr_ck, [])
+        if _sai_palavras_ocr:
+            try:
+                _cond_sai = ' OR '.join(f"UPPER(nome) LIKE '%{p}%'" for p in _sai_palavras_ocr[:5])
+                _sai_similares = pd.read_sql_query(
+                    f"SELECT DISTINCT UPPER(TRIM(nome)) AS nome FROM itens "
+                    f"WHERE nome IS NOT NULL AND ({_cond_sai}) LIMIT 10",
+                    conn
+                )['nome'].tolist()
+            except Exception:
+                _sai_similares = []
+
+    _sai_template = None
+    with _sai_info_col:
+        if _sai_palavras_ocr:
+            st.caption(f"🔤 OCR extraiu: **{', '.join(_sai_palavras_ocr[:6])}**")
+        if _sai_similares:
+            st.success(f"✅ {len(_sai_similares)} produto(s) similar(es) encontrado(s):")
+            _sai_opts = ["— Formulário em branco —"] + _sai_similares[:8]
+            _sai_escolha = st.selectbox("Usar como base:", _sai_opts, key="gd_sai_template_sel")
+            _sai_template = _sai_escolha if _sai_escolha != "— Formulário em branco —" else None
+            if _sai_template:
+                st.code(_sai_template, language=None)
+        elif _foto_sai_bytes:
+            st.info("ℹ️ Nenhum produto similar encontrado. Preencha os campos abaixo.")
+
+    # Pre-preenche campos a partir do template selecionado
+    _sai_tipo_def = ''
+    _sai_mat_def = 'PLÁSTICO PVC'
+    _sai_mec_def = 'SIMPLES'
+    _sai_dims_def = ''
+    _sai_qtd_def = ''
+    _sai_var_def = '— sem variação —'
+    _sai_proc_def = 'INJEÇÃO'
+
+    if _sai_template:
+        import re as _reSaiTp
+        _mt_sai = _reSaiTp.match(r'^(.*?)\s*,?\s*DE\s+', _sai_template)
+        if _mt_sai:
+            _tp_raw = _mt_sai.group(1)
+            _sai_tipo_def = (_tp_raw[len('BRINQUEDO '):] if _tp_raw.startswith('BRINQUEDO ')
+                             else _tp_raw).strip()
+        _md_sai = _reSaiTp.search(r'MEDIDAS?\s+([\d.,*X×\s]+?)\s*CM', _sai_template)
+        if _md_sai:
+            _sai_dims_def = _md_sai.group(1).strip()
+        if 'CONTROLE REMOTO' in _sai_template and 'PILHA' in _sai_template:
+            _sai_mec_def = 'PILHA + CONTROLE REMOTO'
+        elif 'PILHA' in _sai_template:
+            _sai_mec_def = 'PILHA'
+        elif 'FRICÇÃO' in _sai_template:
+            _sai_mec_def = 'FRICÇÃO'
+        elif 'CORDA' in _sai_template:
+            _sai_mec_def = 'CORDA'
+        _mq_sai = _reSaiTp.search(r'C/\s*(\d+)\s*PÇS', _sai_template)
+        if _mq_sai:
+            _sai_qtd_def = _mq_sai.group(1)
+        if 'SORTIDO' in _sai_template:
+            _sai_var_def = 'SORTIDO'
+        elif 'VARIADOS' in _sai_template:
+            _sai_var_def = 'VARIADOS'
+        if 'PELÚCIA' in _sai_template or 'PELUCIA' in _sai_template:
+            _sai_mat_def = 'PELÚCIA C/ ENCHIMENTO DE TECIDO POLIÉSTER'
+        elif 'NYLON' in _sai_template:
+            _sai_mat_def = 'PLÁSTICO PVC,NYLON,BORRACHA,VINIL,ELASTICO,ADESIVO'
+        elif 'METAL' in _sai_template and 'PLÁSTICO' not in _sai_template:
+            _sai_mat_def = 'METAL'
+        elif 'TECIDO POLIÉSTER' in _sai_template:
+            _sai_mat_def = 'PLÁSTICO PVC E TECIDO POLIÉSTER'
+        _mp_sai = _reSaiTp.search(r'PRODUZIDO\s+POR\s+([^,]+)', _sai_template)
+        if _mp_sai:
+            _sai_proc_def = _mp_sai.group(1).strip()
+
+    _MAT_SAI_OPTS = [
+        'PLÁSTICO PVC',
+        'PLÁSTICO PVC E TECIDO POLIÉSTER',
+        'PLÁSTICO PVC,ADESIVO,BORRACHA',
+        'PLÁSTICO PVC,NYLON,BORRACHA,VINIL,ELASTICO,ADESIVO',
+        'METAL',
+        'METAL,PLASTICO PVC,ACRILICO E TINTA DE RASPAGEM',
+        'PELÚCIA C/ ENCHIMENTO DE TECIDO POLIÉSTER',
+        'TECIDO DE POLIÉSTER',
+        'PLÁSTICO PP',
+        'Outro (digitar)',
+    ]
+    _MEC_SAI_OPTS = ['SIMPLES', 'PILHA', 'PILHA + CONTROLE REMOTO', 'FRICÇÃO', 'CORDA']
+    _PROC_SAI_OPTS = [
+        'INJEÇÃO',
+        'CORTE, COSTURA E ENCHIMENTO',
+        'CORTE E COSTURA',
+        'INJEÇÃO, CORTE E COSTURA',
+        'INJEÇÃO E TANQUE DE MISTURA',
+    ]
+    _VAR_SAI_OPTS = ['— sem variação —', 'SORTIDO', 'VARIADOS', 'Digitar…']
+
+    _sai_f1, _sai_f2 = st.columns(2)
+
+    with _sai_f1:
+        _sai_tipo = st.text_input("Tipo de produto *",
+            value=_sai_tipo_def, placeholder="Ex: CARRINHO, BONECA, ANIMAL MUSICAL",
+            key="gd_sai_tipo")
+        _sai_mat_i = (_MAT_SAI_OPTS.index(_sai_mat_def) if _sai_mat_def in _MAT_SAI_OPTS else 0)
+        _sai_mat_s = st.selectbox("Material *", _MAT_SAI_OPTS, index=_sai_mat_i, key="gd_sai_mat")
+        _sai_mat = (st.text_input("Material (digitar):", key="gd_sai_mat_outro")
+                    if _sai_mat_s == 'Outro (digitar)' else _sai_mat_s)
+        _sai_mec_i = (_MEC_SAI_OPTS.index(_sai_mec_def) if _sai_mec_def in _MEC_SAI_OPTS else 0)
+        _sai_mec = st.selectbox("Mecanismo *", _MEC_SAI_OPTS, index=_sai_mec_i, key="gd_sai_mec")
+        _sai_proc_i = next((i for i, v in enumerate(_PROC_SAI_OPTS)
+                            if _sai_proc_def.upper().startswith(v.split(',')[0].upper())), 0)
+        _sai_proc = st.selectbox("Processo de fabricação *", _PROC_SAI_OPTS,
+                                  index=_sai_proc_i, key="gd_sai_proc")
+
+    with _sai_f2:
+        _sai_dims = st.text_input("Medidas *",
+            value=_sai_dims_def, placeholder="Ex: 30*20*10 ou 30X20X10",
+            key="gd_sai_dims")
+        _sai_qtd = st.text_input("Qtd de peças (vazio = peça única)",
+            value=_sai_qtd_def, placeholder="Ex: 4", key="gd_sai_qtd")
+        _sai_var_i = (_VAR_SAI_OPTS.index(_sai_var_def) if _sai_var_def in _VAR_SAI_OPTS else 0)
+        _sai_var_s = st.selectbox("Cor / variação", _VAR_SAI_OPTS,
+                                   index=_sai_var_i, key="gd_sai_var")
+        _sai_var = (st.text_input("Cor/variação:", key="gd_sai_var_outro")
+                    if _sai_var_s == 'Digitar…' else
+                    ('' if _sai_var_s == '— sem variação —' else _sai_var_s))
+
+        _FAIXA_SAI_OPTS = ['+3ANOS', '+6MESES', '+12MESES', '+18MESES', '+5ANOS', '+6ANOS', '+8ANOS']
+        _sai_ind_auto, _sai_rest_auto = _det_faixa_sai(f"{_sai_tipo or ''} {_sai_mat_s or ''}")
+        _sai_ind_i = next((i for i, v in enumerate(_FAIXA_SAI_OPTS) if v == _sai_ind_auto), 0)
+        _sai_ind = st.selectbox("INDICATIVO (faixa etária)", _FAIXA_SAI_OPTS,
+                                 index=_sai_ind_i, key="gd_sai_ind")
+        _REST_SAI_OPTS = ['-3ANOS', 'SEM RESTRIÇÃO', '-6ANOS']
+        _sai_rest_i = next((i for i, v in enumerate(_REST_SAI_OPTS) if v == _sai_rest_auto), 0)
+        _sai_rest = st.selectbox("RESTRITIVO", _REST_SAI_OPTS,
+                                  index=_sai_rest_i, key="gd_sai_rest")
+
+    if st.button("⚙️ Montar Descrição", key="btn_gd_sai_montar", type="primary"):
+        if not (_sai_tipo or '').strip() or not (_sai_dims or '').strip():
+            st.error("⚠️ Preencha pelo menos o Tipo de produto e as Medidas.")
+        else:
+            _MEC_T_SAI = {
+                'SIMPLES': '',
+                'PILHA': ', À PILHA',
+                'PILHA + CONTROLE REMOTO': ', C/ MOTOR À PILHA C/ CONTROLE REMOTO S/ FIO',
+                'FRICÇÃO': ', C/ MOTOR À FRICÇÃO',
+                'CORDA': ', À CORDA',
+            }
+            _MEC_L_SAI = {
+                'SIMPLES': 'SIMPLES', 'PILHA': 'PILHA',
+                'PILHA + CONTROLE REMOTO': 'PILHA', 'FRICÇÃO': 'FRICÇÃO', 'CORDA': 'CORDA',
+            }
+            import re as _reSaiB
+            _dims_b = _reSaiB.sub(r'\s*(CM|MM)\s*$', '', (_sai_dims or '').upper().strip()).strip()
+            _db_sai = (f"BRINQUEDO {(_sai_tipo or '').upper().strip()} "
+                       f"DE {(_sai_mat or '').upper().strip()}")
+            _db_sai += _MEC_T_SAI.get(_sai_mec, '')
+            try:
+                _qn_sai = int((_sai_qtd or '').strip())
+                if _qn_sai > 1:
+                    _db_sai += f', C/ {_qn_sai} PÇS'
+            except (ValueError, AttributeError):
+                pass
+            if (_sai_var or '').strip():
+                _db_sai += f', {(_sai_var or "").upper().strip()}'
+            _db_sai += f', PRODUZIDO POR {(_sai_proc or "INJEÇÃO").upper()}'
+            _db_sai += f', MEDIDAS {_dims_b} CM'
+            _db_sai += f', MECANISMO {_MEC_L_SAI.get(_sai_mec, "SIMPLES")}'
+            _db_sai += f', INDICATIVO {_sai_ind}'
+            _db_sai += (', SEM RESTRIÇÃO' if _sai_rest == 'SEM RESTRIÇÃO'
+                        else f', RESTRITIVO {_sai_rest}')
+            st.session_state['gd_sai_resultado'] = _db_sai
+
+    if 'gd_sai_resultado' in st.session_state:
+        _res_sai = st.session_state['gd_sai_resultado']
+        _ed_sai = st.text_area(
+            f"Descrição gerada ({len(_res_sai)}/200 caracteres)",
+            value=_res_sai, height=100, max_chars=200, key="gd_sai_desc_edit"
+        )
+        _lsai = len(_ed_sai or '')
+        if _lsai > 200:
+            st.error(f"❌ {_lsai} caracteres — excede 200!")
+        elif _lsai > 180:
+            st.warning(f"⚠️ {_lsai}/200 — próximo do limite.")
+        else:
+            st.success(f"✅ {_lsai}/200 caracteres")
+        st.caption("💡 Use Ctrl+A para selecionar e copiar a descrição.")
+
+    st.divider()
+
     # ---- Upload do arquivo (modo planilha) ----
     st.subheader("📊 Modo Planilha — Processar Lote")
     st.caption(
