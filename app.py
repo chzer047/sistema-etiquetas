@@ -16227,6 +16227,17 @@ if _is_active("gerar_descricoes"):
         if _mp_sai:
             _sai_proc_def = _mp_sai.group(1).strip()
 
+    # Carrega clientes distintos do banco
+    try:
+        _sai_clientes_db = pd.read_sql_query(
+            "SELECT DISTINCT TRIM(cliente_base) AS cb FROM sistema5_itens "
+            "WHERE cliente_base IS NOT NULL AND TRIM(cliente_base) != '' ORDER BY cb",
+            conn
+        )['cb'].tolist()
+    except Exception:
+        _sai_clientes_db = []
+    _CLIENTE_SAI_OPTS = ['— todos —'] + _sai_clientes_db
+
     _MAT_SAI_OPTS = [
         'PLÁSTICO PVC',
         'PLÁSTICO PVC E TECIDO POLIÉSTER',
@@ -16252,6 +16263,8 @@ if _is_active("gerar_descricoes"):
     _sai_f1, _sai_f2 = st.columns(2)
 
     with _sai_f1:
+        _sai_cliente = st.selectbox("Cliente / Sistema *", _CLIENTE_SAI_OPTS,
+                                     key="gd_sai_cliente")
         _sai_tipo = st.text_input("Tipo de produto *",
             value=_sai_tipo_def, placeholder="Ex: CARRINHO, BONECA, ANIMAL MUSICAL",
             key="gd_sai_tipo")
@@ -16330,10 +16343,17 @@ if _is_active("gerar_descricoes"):
                 if _pals_fam:
                     _cond_fam = ' AND '.join(
                         f"UPPER(nome) LIKE '%{p}%'" for p in _pals_fam[:2])
+                    _cond_cli_fam = (
+                        f"AND UPPER(TRIM(cliente_base)) = "
+                        f"'{(_sai_cliente or '').upper().strip()}'"
+                        if _sai_cliente and _sai_cliente != '— todos —' else '')
                     _df_fam = pd.read_sql_query(
-                        f"SELECT fabrica, familia, COUNT(*) AS cnt FROM sistema5_itens "
+                        f"SELECT fabrica, familia, cliente_base, categoria, "
+                        f"COUNT(*) AS cnt FROM sistema5_itens "
                         f"WHERE nome IS NOT NULL AND ({_cond_fam}) AND fabrica IS NOT NULL "
-                        f"GROUP BY fabrica, familia ORDER BY cnt DESC LIMIT 5",
+                        f"{_cond_cli_fam} "
+                        f"GROUP BY fabrica, familia, cliente_base, categoria "
+                        f"ORDER BY cnt DESC LIMIT 5",
                         conn
                     )
                     st.session_state['gd_sai_fam_sugs'] = (
@@ -16366,12 +16386,16 @@ if _is_active("gerar_descricoes"):
             st.markdown("**Enquadramento sugerido:**")
             if _sugs_fam_sai:
                 _best_sai = _sugs_fam_sai[0]
+                st.metric("👤 Cliente", _best_sai.get('cliente_base') or '—')
+                st.metric("📂 Categoria", _best_sai.get('categoria') or '—')
                 st.metric("🏭 Fábrica", _best_sai.get('fabrica') or '—')
                 st.metric("🏷️ Família", _best_sai.get('familia') or '—')
                 if len(_sugs_fam_sai) > 1:
                     with st.expander(f"🔄 {len(_sugs_fam_sai) - 1} outra(s) opção(ões)", expanded=False):
                         for _sf in _sugs_fam_sai[1:]:
                             st.caption(
+                                f"👤 {_sf.get('cliente_base', '—')} | "
+                                f"📂 {_sf.get('categoria', '—')} | "
                                 f"🏭 {_sf.get('fabrica', '—')} | "
                                 f"🏷️ {_sf.get('familia', '—')} "
                                 f"({_sf.get('cnt', 0)} itens)")
