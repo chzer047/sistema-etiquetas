@@ -16524,28 +16524,46 @@ if _is_active("gerar_descricoes"):
                 _df_ls = pd.read_excel(_io_ls.BytesIO(_bts_ls), header=int(_hdr_row_ls))
             _df_ls.columns = [str(c).strip() for c in _df_ls.columns]
             _cols_ls = list(_df_ls.columns)
-            st.caption(f"Colunas detectadas: {', '.join(_cols_ls)}")
+            # remover colunas completamente vazias do seletor
+            _cols_ls_valid = [c for c in _cols_ls
+                              if _df_ls[c].dropna().astype(str).str.strip().str.len().sum() > 0]
+            st.caption(f"Colunas com dados: {', '.join(_cols_ls_valid)}")
+
+            def _col_preview(col):
+                vals = [str(v).strip() for v in _df_ls[col].dropna()
+                        if str(v).strip() not in ('', 'nan', 'None')][:3]
+                return f"ex: {', '.join(vals)}" if vals else "vazio"
+
             _lc1, _lc2, _lc3, _lc4 = st.columns(4)
             _col_tipo_ls = _lc1.selectbox(
-                "Coluna: Tipo/Resumo *", _cols_ls,
-                index=next((i for i, c in enumerate(_cols_ls)
-                            if any(k in c.upper() for k in ['TIPO','RESUMO','PRODUTO','NOME','DESCRI'])), 0),
+                "Coluna: Tipo/Resumo *", _cols_ls_valid,
+                index=next((i for i, c in enumerate(_cols_ls_valid)
+                            if any(k in c.upper() for k in
+                                   ['TIPO','RESUMO','PRODUTO','NOME','DESCRI'])), 0),
                 key="ls_col_tipo")
+            _lc1.caption(_col_preview(_col_tipo_ls))
             _col_dims_ls = _lc2.selectbox(
-                "Coluna: Medidas *", _cols_ls,
-                index=next((i for i, c in enumerate(_cols_ls)
-                            if any(k in c.upper() for k in ['MEDIDA','DIM','TAMANHO','SIZE'])), 0),
+                "Coluna: Medidas *", _cols_ls_valid,
+                index=next((i for i, c in enumerate(_cols_ls_valid)
+                            if any(k in c.upper() for k in
+                                   ['MEDIDA','DIM','TAMANHO','SIZE','MEAS'])), 0),
                 key="ls_col_dims")
+            _lc2.caption(_col_preview(_col_dims_ls))
             _col_qtd_ls = _lc3.selectbox(
-                "Coluna: Qtd de Peças", ['(nenhuma)'] + _cols_ls,
-                index=next((i+1 for i, c in enumerate(_cols_ls)
-                            if any(k in c.upper() for k in ['QTD','QT ','PEÇA','PECA','PARTES'])), 0),
+                "Coluna: Qtd de Peças", ['(nenhuma)'] + _cols_ls_valid,
+                index=next((i+1 for i, c in enumerate(_cols_ls_valid)
+                            if any(k in c.upper() for k in
+                                   ['QTD','QT/','QTY','PEÇA','PECA','PARTES','PCS'])), 0),
                 key="ls_col_qtd")
+            if _col_qtd_ls != '(nenhuma)':
+                _lc3.caption(_col_preview(_col_qtd_ls))
             _col_mat_ls = _lc4.selectbox(
-                "Coluna: Material", ['(nenhuma)'] + _cols_ls,
-                index=next((i+1 for i, c in enumerate(_cols_ls)
+                "Coluna: Material", ['(nenhuma)'] + _cols_ls_valid,
+                index=next((i+1 for i, c in enumerate(_cols_ls_valid)
                             if 'MATERIAL' in c.upper()), 0),
                 key="ls_col_mat")
+            if _col_mat_ls != '(nenhuma)':
+                _lc4.caption(_col_preview(_col_mat_ls))
             _lc5, _lc6 = st.columns(2)
             _cli_ls = _lc5.selectbox(
                 "Cliente / Sistema", _CLIENTE_SAI_OPTS, key="ls_cliente")
