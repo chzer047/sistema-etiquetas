@@ -16319,6 +16319,7 @@ if _is_active("gerar_descricoes"):
             }
             import re as _reSaiB
             _dims_b = _reSaiB.sub(r'\s*(CM|MM)\s*$', '', (_sai_dims or '').upper().strip()).strip()
+            _dims_b = _dims_b.replace('*', 'X').replace(' X ', 'X').replace('X ', 'X').replace(' X', 'X')
             _db_sai = (f"BRINQUEDO {(_sai_tipo or '').upper().strip()} "
                        f"DE {(_sai_mat or '').upper().strip()}")
             _db_sai += _MEC_T_SAI.get(_sai_mec, '')
@@ -16336,8 +16337,9 @@ if _is_active("gerar_descricoes"):
             _db_sai += f', INDICATIVO {_sai_ind}'
             _db_sai += (', SEM RESTRIÇÃO' if _sai_rest == 'SEM RESTRIÇÃO'
                         else f', RESTRITIVO {_sai_rest}')
-            st.session_state['gd_sai_resultado'] = _db_sai
-            # Buscar família/fábrica no sistema5_itens
+            _db_sai_padrao = _db_sai  # versão pelo template padrão (fallback)
+            # Buscar família/fábrica e exemplos reais no sistema5_itens
+            st.session_state['gd_sai_exemplos_fam'] = []
             try:
                 _pals_fam = [p for p in (_sai_tipo or '').upper().split() if len(p) > 3]
                 if _pals_fam:
@@ -16358,10 +16360,74 @@ if _is_active("gerar_descricoes"):
                     )
                     st.session_state['gd_sai_fam_sugs'] = (
                         _df_fam.to_dict('records') if not _df_fam.empty else [])
+                    # Buscar exemplos reais da família encontrada e adaptar descrição
+                    if not _df_fam.empty:
+                        _bfrow = _df_fam.iloc[0]
+                        _fam_id = _bfrow.get('familia')
+                        _cli_id = str(_bfrow.get('cliente_base') or '').upper().strip()
+                        _cex_cli = (f"AND UPPER(TRIM(cliente_base)) = '{_cli_id}'"
+                                    if _cli_id else '')
+                        _df_exs = pd.read_sql_query(
+                            f"SELECT nome, COUNT(*) AS cnt FROM sistema5_itens "
+                            f"WHERE familia = '{_fam_id}' AND nome IS NOT NULL "
+                            f"AND TRIM(nome) != '' {_cex_cli} "
+                            f"GROUP BY nome ORDER BY cnt DESC LIMIT 20",
+                            conn
+                        )
+                        _kws_ex = [p for p in (_sai_tipo or '').upper().split()
+                                   if len(p) > 3]
+                        _exs_all = _df_exs['nome'].tolist()
+                        _exs_fil = [r for r in _exs_all
+                                    if any(k in (r or '').upper() for k in _kws_ex)]
+                        _exs_show = _exs_fil if _exs_fil else _exs_all
+                        st.session_state['gd_sai_exemplos_fam'] = _exs_show[:6]
+                        if _exs_show:
+                            import re as _reAdapt
+                            _base_ex = _exs_show[0]
+                            # Substituir MEDIDAS
+                            _base_ex = _reAdapt.sub(
+                                r'MEDIDAS [^,]+', f'MEDIDAS {_dims_b} CM',
+                                _base_ex, flags=_reAdapt.IGNORECASE)
+                            # Substituir C/ N PÇS
+                            try:
+                                _qn_ex = int((_sai_qtd or '').strip())
+                                if _qn_ex > 1:
+                                    if _reAdapt.search(r'C/ \d+ PÇS', _base_ex,
+                                                       flags=_reAdapt.IGNORECASE):
+                                        _base_ex = _reAdapt.sub(
+                                            r'C/ \d+ PÇS', f'C/ {_qn_ex} PÇS',
+                                            _base_ex, flags=_reAdapt.IGNORECASE)
+                                else:
+                                    _base_ex = _reAdapt.sub(
+                                        r',\s*C/ \d+ PÇS', '', _base_ex,
+                                        flags=_reAdapt.IGNORECASE)
+                            except (ValueError, AttributeError):
+                                pass
+                            # Substituir INDICATIVO
+                            _base_ex = _reAdapt.sub(
+                                r'INDICATIVO [^,\n]+', f'INDICATIVO {_sai_ind}',
+                                _base_ex, flags=_reAdapt.IGNORECASE)
+                            # Substituir RESTRITIVO / SEM RESTRIÇÃO
+                            if _sai_rest == 'SEM RESTRIÇÃO':
+                                _base_ex = _reAdapt.sub(
+                                    r',?\s*RESTRITIVO [^,\n]+', '',
+                                    _base_ex, flags=_reAdapt.IGNORECASE)
+                                if 'SEM RESTRIÇÃO' not in _base_ex.upper():
+                                    _base_ex = _base_ex.rstrip(', \n') + ', SEM RESTRIÇÃO'
+                            else:
+                                _base_ex = _reAdapt.sub(
+                                    r'SEM RESTRIÇÃO', f'RESTRITIVO {_sai_rest}',
+                                    _base_ex, flags=_reAdapt.IGNORECASE)
+                                _base_ex = _reAdapt.sub(
+                                    r'RESTRITIVO [^,\n]+', f'RESTRITIVO {_sai_rest}',
+                                    _base_ex, flags=_reAdapt.IGNORECASE)
+                            _db_sai = _base_ex.strip()
                 else:
                     st.session_state['gd_sai_fam_sugs'] = []
             except Exception:
                 st.session_state['gd_sai_fam_sugs'] = []
+            st.session_state['gd_sai_resultado'] = _db_sai
+            st.session_state['gd_sai_desc_padrao'] = _db_sai_padrao
 
     if 'gd_sai_resultado' in st.session_state:
         _res_sai = st.session_state['gd_sai_resultado']
@@ -16401,6 +16467,232 @@ if _is_active("gerar_descricoes"):
                                 f"({_sf.get('cnt', 0)} itens)")
             else:
                 st.info("Nenhuma família encontrada no banco para esse tipo.")
+
+        # Exemplos reais da família e descrição pelo template padrão
+        _exs_fam_sai = st.session_state.get('gd_sai_exemplos_fam', [])
+        _padrao_sai = st.session_state.get('gd_sai_desc_padrao', '')
+        if _exs_fam_sai:
+            with st.expander(
+                    f"📋 {len(_exs_fam_sai)} exemplos reais da família encontrada "
+                    f"(usados como base)", expanded=False):
+                for _ei, _ex in enumerate(_exs_fam_sai):
+                    st.caption(f"{_ei + 1}. {_ex}")
+        if _padrao_sai and _padrao_sai != st.session_state.get('gd_sai_resultado', ''):
+            with st.expander("⚙️ Descrição pelo template padrão (sem exemplo do banco)",
+                             expanded=False):
+                st.code(_padrao_sai, language=None)
+
+    st.divider()
+
+    # ---- Lote Sem IA ----
+    st.subheader("📋 Lote Sem IA — Gerar Descrições em Massa")
+    st.caption(
+        "Envie uma planilha com as colunas de descrição dos produtos. "
+        "O sistema busca a família no banco e usa exemplos reais como base, "
+        "substituindo apenas medidas, qtd e faixa etária."
+    )
+    _arq_lote_sai = st.file_uploader(
+        "Arquivo (.xlsx, .xls, .csv)", type=["xlsx", "xls", "csv"],
+        key="upload_lote_sai_v2"
+    )
+    if _arq_lote_sai:
+        try:
+            _arq_lote_sai.seek(0)
+            _bts_ls = _arq_lote_sai.read(); _arq_lote_sai.seek(0)
+            if _arq_lote_sai.name.lower().endswith('.csv'):
+                _df_ls = pd.read_csv(io.BytesIO(_bts_ls))
+            else:
+                _df_ls = pd.read_excel(io.BytesIO(_bts_ls))
+            _df_ls.columns = [str(c).strip() for c in _df_ls.columns]
+            _cols_ls = list(_df_ls.columns)
+            st.caption(f"Colunas detectadas: {', '.join(_cols_ls)}")
+            _lc1, _lc2, _lc3, _lc4 = st.columns(4)
+            _col_tipo_ls = _lc1.selectbox(
+                "Coluna: Tipo/Resumo *", _cols_ls,
+                index=next((i for i, c in enumerate(_cols_ls)
+                            if any(k in c.upper() for k in ['TIPO','RESUMO','PRODUTO','NOME','DESCRI'])), 0),
+                key="ls_col_tipo")
+            _col_dims_ls = _lc2.selectbox(
+                "Coluna: Medidas *", _cols_ls,
+                index=next((i for i, c in enumerate(_cols_ls)
+                            if any(k in c.upper() for k in ['MEDIDA','DIM','TAMANHO','SIZE'])), 0),
+                key="ls_col_dims")
+            _col_qtd_ls = _lc3.selectbox(
+                "Coluna: Qtd de Peças", ['(nenhuma)'] + _cols_ls,
+                index=next((i+1 for i, c in enumerate(_cols_ls)
+                            if any(k in c.upper() for k in ['QTD','QT ','PEÇA','PECA','PARTES'])), 0),
+                key="ls_col_qtd")
+            _col_mat_ls = _lc4.selectbox(
+                "Coluna: Material", ['(nenhuma)'] + _cols_ls,
+                index=next((i+1 for i, c in enumerate(_cols_ls)
+                            if 'MATERIAL' in c.upper()), 0),
+                key="ls_col_mat")
+            _lc5, _lc6 = st.columns(2)
+            _cli_ls = _lc5.selectbox(
+                "Cliente / Sistema", _CLIENTE_SAI_OPTS, key="ls_cliente")
+            _mat_default_ls = _lc6.selectbox(
+                "Material padrão (se coluna vazia)",
+                ['PLÁSTICO PVC', 'PLÁSTICO ABS', 'METAL', 'MADEIRA',
+                 'TECIDO', 'PELÚCIA', 'BORRACHA', 'PAPEL/PAPELÃO', 'ESPUMA/EVA', 'OUTRO'],
+                key="ls_mat_default")
+            if st.button("⚙️ Gerar Descrições em Lote", key="btn_lote_sai",
+                         type="primary"):
+                _FAIXA_RULES_LS = [
+                    (['PELÚCIA'], '+6MESES', None), (['PELUCIA'], '+6MESES', None),
+                    (['BEBÊ'], '+6MESES', None), (['BEBE'], '+6MESES', None),
+                    (['SINUCA'], '+6ANOS', '-3ANOS'), (['BEYBLADE'], '+6ANOS', '-3ANOS'),
+                    (['PISTOLA'], '+6ANOS', '-3ANOS'), (['ESMALTE'], '+6ANOS', '-3ANOS'),
+                    (['DARDO'], '+6ANOS', '-6ANOS'),
+                    (['CONTROLE', 'REMOTO'], '+6ANOS', '-3ANOS'),
+                    (['BONECA'], '+3ANOS', '-3ANOS'), (['CARRINHO'], '+3ANOS', '-3ANOS'),
+                    (['MAQUIAGEM'], '+3ANOS', '-3ANOS'),
+                    (['BRINQUEDO'], '+3ANOS', '-3ANOS'),
+                ]
+                def _faixa_ls(_t):
+                    _tu = (_t or '').upper()
+                    for _ps, _ind, _res in _FAIXA_RULES_LS:
+                        if all(p in _tu for p in _ps):
+                            return _ind, (_res or 'SEM RESTRIÇÃO')
+                    return '+3ANOS', '-3ANOS'
+                import re as _reLS
+                _cond_cli_ls = (
+                    f"AND UPPER(TRIM(cliente_base)) = '{_cli_ls.upper().strip()}'"
+                    if _cli_ls and _cli_ls != '— todos —' else '')
+                _resultados_ls = []
+                _prog_ls = st.progress(0, text="Processando...")
+                _n_ls = len(_df_ls)
+                for _idx_ls, _row_ls in _df_ls.iterrows():
+                    _prog_ls.progress((_idx_ls + 1) / max(_n_ls, 1),
+                                      text=f"Linha {_idx_ls + 1}/{_n_ls}...")
+                    _tipo_ls = str(_row_ls.get(_col_tipo_ls, '') or '').strip()
+                    _dims_ls_raw = str(_row_ls.get(_col_dims_ls, '') or '').strip()
+                    _dims_ls = _reLS.sub(r'\s*(CM|MM)\s*$', '', _dims_ls_raw.upper()).strip()
+                    _dims_ls = _dims_ls.replace('*', 'X').replace(' X ', 'X').replace('X ', 'X').replace(' X', 'X')
+                    _qtd_ls = ''
+                    if _col_qtd_ls != '(nenhuma)':
+                        _qtd_ls = str(_row_ls.get(_col_qtd_ls, '') or '').strip()
+                    _mat_ls = _mat_default_ls
+                    if _col_mat_ls != '(nenhuma)':
+                        _mat_v = str(_row_ls.get(_col_mat_ls, '') or '').strip()
+                        if _mat_v:
+                            _mat_ls = _mat_v
+                    _ind_ls, _rest_ls = _faixa_ls(_tipo_ls)
+                    # Montar descrição padrão
+                    _desc_ls = f"BRINQUEDO {_tipo_ls.upper()} DE {_mat_ls.upper()}"
+                    try:
+                        _qn_ls = int(_qtd_ls)
+                        if _qn_ls > 1:
+                            _desc_ls += f', C/ {_qn_ls} PÇS'
+                    except (ValueError, AttributeError):
+                        pass
+                    _desc_ls += f', PRODUZIDO POR INJEÇÃO, MEDIDAS {_dims_ls} CM'
+                    _desc_ls += f', MECANISMO SIMPLES, INDICATIVO {_ind_ls}'
+                    _desc_ls += (', SEM RESTRIÇÃO' if _rest_ls == 'SEM RESTRIÇÃO'
+                                 else f', RESTRITIVO {_rest_ls}')
+                    # Buscar família e exemplo real
+                    _fabrica_ls = ''; _familia_ls = ''; _categoria_ls = ''; _cli_res_ls = ''
+                    try:
+                        _pals_ls = [p for p in _tipo_ls.upper().split() if len(p) > 3]
+                        if _pals_ls and _dims_ls:
+                            _cond_ls = ' AND '.join(
+                                f"UPPER(nome) LIKE '%{p}%'" for p in _pals_ls[:2])
+                            _df_fls = pd.read_sql_query(
+                                f"SELECT fabrica, familia, cliente_base, categoria, "
+                                f"COUNT(*) AS cnt FROM sistema5_itens "
+                                f"WHERE nome IS NOT NULL AND ({_cond_ls}) "
+                                f"AND fabrica IS NOT NULL {_cond_cli_ls} "
+                                f"GROUP BY fabrica, familia, cliente_base, categoria "
+                                f"ORDER BY cnt DESC LIMIT 3",
+                                conn
+                            )
+                            if not _df_fls.empty:
+                                _bls = _df_fls.iloc[0]
+                                _fabrica_ls = str(_bls.get('fabrica') or '')
+                                _familia_ls = str(_bls.get('familia') or '')
+                                _categoria_ls = str(_bls.get('categoria') or '')
+                                _cli_res_ls = str(_bls.get('cliente_base') or '')
+                                # Buscar exemplo real da família
+                                _fam_id_ls = _bls.get('familia')
+                                _cli_id_ls = str(_bls.get('cliente_base') or '').upper().strip()
+                                _cex_ls = (f"AND UPPER(TRIM(cliente_base)) = '{_cli_id_ls}'"
+                                           if _cli_id_ls else '')
+                                _df_exls = pd.read_sql_query(
+                                    f"SELECT nome, COUNT(*) AS cnt FROM sistema5_itens "
+                                    f"WHERE familia = '{_fam_id_ls}' AND nome IS NOT NULL "
+                                    f"AND TRIM(nome) != '' {_cex_ls} "
+                                    f"GROUP BY nome ORDER BY cnt DESC LIMIT 20",
+                                    conn
+                                )
+                                _exs_ls = [r for r in _df_exls['nome'].tolist()
+                                           if any(k in (r or '').upper()
+                                                  for k in _pals_ls)]
+                                if not _exs_ls:
+                                    _exs_ls = _df_exls['nome'].tolist()
+                                if _exs_ls:
+                                    _bex_ls = _exs_ls[0]
+                                    _bex_ls = _reLS.sub(
+                                        r'MEDIDAS [^,]+', f'MEDIDAS {_dims_ls} CM',
+                                        _bex_ls, flags=_reLS.IGNORECASE)
+                                    try:
+                                        _qn2_ls = int(_qtd_ls)
+                                        if _qn2_ls > 1:
+                                            if _reLS.search(r'C/ \d+ PÇS', _bex_ls,
+                                                            flags=_reLS.IGNORECASE):
+                                                _bex_ls = _reLS.sub(
+                                                    r'C/ \d+ PÇS', f'C/ {_qn2_ls} PÇS',
+                                                    _bex_ls, flags=_reLS.IGNORECASE)
+                                        else:
+                                            _bex_ls = _reLS.sub(
+                                                r',\s*C/ \d+ PÇS', '', _bex_ls,
+                                                flags=_reLS.IGNORECASE)
+                                    except (ValueError, AttributeError):
+                                        pass
+                                    _bex_ls = _reLS.sub(
+                                        r'INDICATIVO [^,\n]+', f'INDICATIVO {_ind_ls}',
+                                        _bex_ls, flags=_reLS.IGNORECASE)
+                                    if _rest_ls == 'SEM RESTRIÇÃO':
+                                        _bex_ls = _reLS.sub(
+                                            r',?\s*RESTRITIVO [^,\n]+', '',
+                                            _bex_ls, flags=_reLS.IGNORECASE)
+                                        if 'SEM RESTRIÇÃO' not in _bex_ls.upper():
+                                            _bex_ls = _bex_ls.rstrip(', \n') + ', SEM RESTRIÇÃO'
+                                    else:
+                                        _bex_ls = _reLS.sub(
+                                            r'SEM RESTRIÇÃO', f'RESTRITIVO {_rest_ls}',
+                                            _bex_ls, flags=_reLS.IGNORECASE)
+                                        _bex_ls = _reLS.sub(
+                                            r'RESTRITIVO [^,\n]+',
+                                            f'RESTRITIVO {_rest_ls}',
+                                            _bex_ls, flags=_reLS.IGNORECASE)
+                                    _desc_ls = _bex_ls.strip()
+                    except Exception:
+                        pass
+                    _resultados_ls.append({
+                        **{c: _row_ls[c] for c in _cols_ls},
+                        'DESCRIÇÃO GERADA': _desc_ls,
+                        'FAMÍLIA': _familia_ls,
+                        'FÁBRICA': _fabrica_ls,
+                        'CATEGORIA': _categoria_ls,
+                        'CLIENTE SUGERIDO': _cli_res_ls,
+                    })
+                _prog_ls.empty()
+                _df_out_ls = pd.DataFrame(_resultados_ls)
+                st.success(f"✅ {len(_df_out_ls)} descrições geradas.")
+                st.dataframe(_df_out_ls[['DESCRIÇÃO GERADA', 'FAMÍLIA', 'FÁBRICA',
+                                          'CATEGORIA', 'CLIENTE SUGERIDO']
+                                         + _cols_ls].head(20), use_container_width=True)
+                _buf_ls = io.BytesIO()
+                with pd.ExcelWriter(_buf_ls, engine='openpyxl') as _wls:
+                    _df_out_ls.to_excel(_wls, index=False, sheet_name='Descrições')
+                _buf_ls.seek(0)
+                st.download_button(
+                    "⬇️ Baixar resultado (.xlsx)", data=_buf_ls,
+                    file_name="descricoes_lote.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_lote_sai"
+                )
+        except Exception as _e_ls:
+            st.error(f"Erro ao processar planilha: {_e_ls}")
 
     st.divider()
 
