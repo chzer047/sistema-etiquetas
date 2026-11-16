@@ -16500,10 +16500,27 @@ if _is_active("gerar_descricoes"):
             import io as _io_ls
             _arq_lote_sai.seek(0)
             _bts_ls = _arq_lote_sai.read(); _arq_lote_sai.seek(0)
+            # Auto-detectar linha do cabeçalho
+            _hdr_row_ls = 0
+            if not _arq_lote_sai.name.lower().endswith('.csv'):
+                _df_preview = pd.read_excel(_io_ls.BytesIO(_bts_ls), header=None, nrows=10)
+                for _ri in range(min(10, len(_df_preview))):
+                    _row_vals = [str(v).strip() for v in _df_preview.iloc[_ri]
+                                 if str(v).strip() not in ('', 'nan', 'None')]
+                    if len(_row_vals) >= 3:
+                        _hdr_row_ls = _ri
+                        break
+            _hdr_row_ls = st.number_input(
+                "Linha do cabeçalho (0 = primeira linha)",
+                min_value=0, max_value=20, value=_hdr_row_ls, step=1,
+                key="ls_hdr_row",
+                help="Se as colunas aparecerem como 'Unnamed', aumente este número."
+            )
+            _arq_lote_sai.seek(0); _bts_ls = _arq_lote_sai.read(); _arq_lote_sai.seek(0)
             if _arq_lote_sai.name.lower().endswith('.csv'):
-                _df_ls = pd.read_csv(_io_ls.BytesIO(_bts_ls))
+                _df_ls = pd.read_csv(_io_ls.BytesIO(_bts_ls), header=int(_hdr_row_ls))
             else:
-                _df_ls = pd.read_excel(_io_ls.BytesIO(_bts_ls))
+                _df_ls = pd.read_excel(_io_ls.BytesIO(_bts_ls), header=int(_hdr_row_ls))
             _df_ls.columns = [str(c).strip() for c in _df_ls.columns]
             _cols_ls = list(_df_ls.columns)
             st.caption(f"Colunas detectadas: {', '.join(_cols_ls)}")
