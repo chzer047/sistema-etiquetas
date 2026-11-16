@@ -16376,10 +16376,25 @@ if _is_active("gerar_descricoes"):
                         )
                         _kws_ex = [p for p in (_sai_tipo or '').upper().split()
                                    if len(p) > 3]
+                        _tipo_up = (_sai_tipo or '').upper()
+                        # Palavras estruturais: evitar se o tipo não as contém
+                        _struct_words = ['CONJUNTO', 'KIT', 'JOGO', 'VARIADOS',
+                                         'SORTIDOS', 'SORTIDO']
+                        _extra_in_tipo = [w for w in _struct_words if w in _tipo_up]
                         _exs_all = _df_exs['nome'].tolist()
+                        # 1) match por palavra-chave
                         _exs_fil = [r for r in _exs_all
                                     if any(k in (r or '').upper() for k in _kws_ex)]
-                        _exs_show = _exs_fil if _exs_fil else _exs_all
+                        if not _exs_fil:
+                            _exs_fil = _exs_all
+                        # 2) se tipo não tem CONJUNTO/KIT etc., prefira exemplos sem esses termos
+                        if not _extra_in_tipo:
+                            _exs_sem_conj = [r for r in _exs_fil
+                                             if not any(w in (r or '').upper()
+                                                        for w in _struct_words)]
+                            if _exs_sem_conj:
+                                _exs_fil = _exs_sem_conj
+                        _exs_show = _exs_fil
                         st.session_state['gd_sai_exemplos_fam'] = _exs_show[:6]
                         if _exs_show:
                             import re as _reAdapt
@@ -16660,11 +16675,22 @@ if _is_active("gerar_descricoes"):
                                     f"GROUP BY nome ORDER BY cnt DESC LIMIT 20",
                                     conn
                                 )
+                                _struct_ws = ['CONJUNTO', 'KIT', 'JOGO', 'VARIADOS',
+                                              'SORTIDOS', 'SORTIDO']
+                                _tipo_up_ls = _tipo_ls.upper()
+                                _extra_ls = [w for w in _struct_ws if w in _tipo_up_ls]
                                 _exs_ls = [r for r in _df_exls['nome'].tolist()
                                            if any(k in (r or '').upper()
                                                   for k in _pals_ls)]
                                 if not _exs_ls:
                                     _exs_ls = _df_exls['nome'].tolist()
+                                # preferir exemplos sem CONJUNTO/KIT se tipo não os tem
+                                if not _extra_ls:
+                                    _exs_ls_sc = [r for r in _exs_ls
+                                                  if not any(w in (r or '').upper()
+                                                             for w in _struct_ws)]
+                                    if _exs_ls_sc:
+                                        _exs_ls = _exs_ls_sc
                                 if _exs_ls:
                                     _bex_ls = _exs_ls[0]
                                     _bex_ls = _reLS.sub(
