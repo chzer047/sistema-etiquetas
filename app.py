@@ -16497,12 +16497,13 @@ if _is_active("gerar_descricoes"):
     )
     if _arq_lote_sai:
         try:
+            import io as _io_ls
             _arq_lote_sai.seek(0)
             _bts_ls = _arq_lote_sai.read(); _arq_lote_sai.seek(0)
             if _arq_lote_sai.name.lower().endswith('.csv'):
-                _df_ls = pd.read_csv(io.BytesIO(_bts_ls))
+                _df_ls = pd.read_csv(_io_ls.BytesIO(_bts_ls))
             else:
-                _df_ls = pd.read_excel(io.BytesIO(_bts_ls))
+                _df_ls = pd.read_excel(_io_ls.BytesIO(_bts_ls))
             _df_ls.columns = [str(c).strip() for c in _df_ls.columns]
             _cols_ls = list(_df_ls.columns)
             st.caption(f"Colunas detectadas: {', '.join(_cols_ls)}")
@@ -16681,7 +16682,7 @@ if _is_active("gerar_descricoes"):
                 st.dataframe(_df_out_ls[['DESCRIÇÃO GERADA', 'FAMÍLIA', 'FÁBRICA',
                                           'CATEGORIA', 'CLIENTE SUGERIDO']
                                          + _cols_ls].head(20), use_container_width=True)
-                _buf_ls = io.BytesIO()
+                _buf_ls = _io_ls.BytesIO()
                 with pd.ExcelWriter(_buf_ls, engine='openpyxl') as _wls:
                     _df_out_ls.to_excel(_wls, index=False, sheet_name='Descrições')
                 _buf_ls.seek(0)
