@@ -10634,6 +10634,30 @@ if _is_active("confirmacao"):
             if candidatos_diag is not None and not candidatos_diag.empty:
                 st.info("Candidatos encontrados no Sistema 5:")
                 st.dataframe(normalizar_df_para_exibicao(candidatos_diag), use_container_width=True)
+
+                # Aviso de divergência de código de barras
+                if diag_ref.get("item_confirmacao"):
+                    _cod_conf_diag = str(
+                        diag_ref["item_confirmacao"].get("CODIGO", "") or ""
+                    ).strip().replace(" ", "")
+                    _cods_s5_diag = (
+                        candidatos_diag["codigo"]
+                        .dropna()
+                        .astype(str)
+                        .str.strip()
+                        .str.replace(" ", "", regex=False)
+                        .unique()
+                        .tolist()
+                    )
+                    _cods_s5_diag = [c for c in _cods_s5_diag if c and c.lower() != "nan"]
+                    if _cod_conf_diag and _cods_s5_diag and _cod_conf_diag not in _cods_s5_diag:
+                        st.warning(
+                            f"⚠️ **Código de barras divergente do Sistema 5**\n\n"
+                            f"- Código usado na confirmação: `{_cod_conf_diag}`\n"
+                            f"- Código(s) no Sistema 5: `{'`, `'.join(_cods_s5_diag[:5])}`\n\n"
+                            "Verifique qual está impresso no produto físico — pode indicar que o "
+                            "arquivo de inclusão foi atualizado com código novo após a certificação."
+                        )
             else:
                 st.error("Nenhum candidato encontrado no Sistema 5 pela busca bruta.")
 
@@ -10803,6 +10827,47 @@ if _is_active("confirmacao"):
             )
 
             st.success(f"Preenchimento concluído ✅ {total_preenchidos} células preenchidas.")
+
+            # Verifica divergências de código de barras entre o que foi preenchido e o Sistema 5
+            _divs_cod = []
+            for _ref_dv in sorted(_refs_unicas):
+                _item_dv = buscar_item_confirmacao(_ref_dv)
+                if not _item_dv:
+                    continue
+                _cod_usado = str(_item_dv.get("CODIGO", "") or "").strip().replace(" ", "")
+                if not _cod_usado or _cod_usado.lower() == "nan":
+                    continue
+                try:
+                    _cands_dv = (
+                        pd.read_sql_query(
+                            "SELECT DISTINCT codigo FROM sistema5_itens "
+                            "WHERE (UPPER(modelo) LIKE UPPER(?) OR UPPER(modelo) LIKE UPPER(?)) "
+                            "AND codigo IS NOT NULL AND TRIM(codigo) != '' LIMIT 10",
+                            conn, params=(f"{_ref_dv}%", f"%{_ref_dv}%")
+                        )["codigo"]
+                        .dropna().astype(str).str.strip().str.replace(" ", "", regex=False)
+                        .tolist()
+                    )
+                    _cands_dv = [c for c in _cands_dv if c and c.lower() != "nan"]
+                except Exception:
+                    _cands_dv = []
+                if _cands_dv and _cod_usado not in _cands_dv:
+                    _divs_cod.append({
+                        "Referência": _ref_dv,
+                        "Código preenchido": _cod_usado,
+                        "Código no Sistema 5": ", ".join(_cands_dv[:3]),
+                    })
+
+            if _divs_cod:
+                st.warning(
+                    f"⚠️ **{len(_divs_cod)} referência(s) com código de barras divergente do Sistema 5** — "
+                    "o código preenchido veio de outra fonte (arquivo de inclusão anterior ou certificado). "
+                    "Confira no produto físico qual está correto."
+                )
+                st.dataframe(
+                    pd.DataFrame(_divs_cod),
+                    use_container_width=True, hide_index=True
+                )
 
             if nao_encontrados:
                 st.warning("Algumas referências verdes não foram encontradas no banco.")
