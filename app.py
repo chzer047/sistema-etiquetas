@@ -16388,13 +16388,31 @@ if _is_active("gerar_descricoes"):
                         _cli_id = str(_bfrow.get('cliente_base') or '').upper().strip()
                         _cex_cli = (f"AND UPPER(TRIM(cliente_base)) = '{_cli_id}'"
                                     if _cli_id else '')
+                        # Palavras-chave do material para filtro
+                        import re as _reMat
+                        _mat_kws_ex = [p for p in _reMat.split(
+                            r'[\s,/]+', (_sai_mat or '').upper())
+                            if len(p.strip()) > 3]
+                        # Montar filtro SQL de material para buscar exemplos mais precisos
+                        _cex_mat = (' AND (' + ' OR '.join(
+                            f"UPPER(nome) LIKE '%{k}%'" for k in _mat_kws_ex[:2]) + ')'
+                            if _mat_kws_ex else '')
                         _df_exs = pd.read_sql_query(
                             f"SELECT nome, COUNT(*) AS cnt FROM sistema5_itens "
                             f"WHERE familia = '{_fam_id}' AND nome IS NOT NULL "
-                            f"AND TRIM(nome) != '' {_cex_cli} "
+                            f"AND TRIM(nome) != '' {_cex_cli}{_cex_mat} "
                             f"GROUP BY nome ORDER BY cnt DESC LIMIT 20",
                             conn
                         )
+                        # Fallback sem filtro de material se não achou exemplos
+                        if _df_exs.empty and _cex_mat:
+                            _df_exs = pd.read_sql_query(
+                                f"SELECT nome, COUNT(*) AS cnt FROM sistema5_itens "
+                                f"WHERE familia = '{_fam_id}' AND nome IS NOT NULL "
+                                f"AND TRIM(nome) != '' {_cex_cli} "
+                                f"GROUP BY nome ORDER BY cnt DESC LIMIT 20",
+                                conn
+                            )
                         _kws_ex = [p for p in (_sai_tipo or '').upper().split()
                                    if len(p) > 3]
                         _tipo_up = (_sai_tipo or '').upper()
@@ -16403,12 +16421,19 @@ if _is_active("gerar_descricoes"):
                                          'SORTIDOS', 'SORTIDO']
                         _extra_in_tipo = [w for w in _struct_words if w in _tipo_up]
                         _exs_all = _df_exs['nome'].tolist()
-                        # 1) match por palavra-chave
+                        # 1) match por palavra-chave do tipo
                         _exs_fil = [r for r in _exs_all
                                     if any(k in (r or '').upper() for k in _kws_ex)]
                         if not _exs_fil:
                             _exs_fil = _exs_all
-                        # 2) se tipo não tem CONJUNTO/KIT etc., prefira exemplos sem esses termos
+                        # 2) refinar por material (evitar ex: PELÚCIA quando tipo é PLÁSTICO)
+                        if _mat_kws_ex:
+                            _exs_fil_mat = [r for r in _exs_fil
+                                            if any(k in (r or '').upper()
+                                                   for k in _mat_kws_ex)]
+                            if _exs_fil_mat:
+                                _exs_fil = _exs_fil_mat
+                        # 3) se tipo não tem CONJUNTO/KIT etc., prefira exemplos sem esses termos
                         if not _extra_in_tipo:
                             _exs_sem_conj = [r for r in _exs_fil
                                              if not any(w in (r or '').upper()
@@ -16715,13 +16740,26 @@ if _is_active("gerar_descricoes"):
                                 _cli_id_ls = str(_bls.get('cliente_base') or '').upper().strip()
                                 _cex_ls = (f"AND UPPER(TRIM(cliente_base)) = '{_cli_id_ls}'"
                                            if _cli_id_ls else '')
+                                # Filtro SQL de material para exemplos mais precisos
+                                _cex_mat_ls = (' AND (' + ' OR '.join(
+                                    f"UPPER(nome) LIKE '%{k}%'" for k in _mat_kws_ls) + ')'
+                                    if _mat_kws_ls else '')
                                 _df_exls = pd.read_sql_query(
                                     f"SELECT nome, COUNT(*) AS cnt FROM sistema5_itens "
                                     f"WHERE familia = '{_fam_id_ls}' AND nome IS NOT NULL "
-                                    f"AND TRIM(nome) != '' {_cex_ls} "
+                                    f"AND TRIM(nome) != '' {_cex_ls}{_cex_mat_ls} "
                                     f"GROUP BY nome ORDER BY cnt DESC LIMIT 20",
                                     conn
                                 )
+                                # Fallback sem filtro de material
+                                if _df_exls.empty and _cex_mat_ls:
+                                    _df_exls = pd.read_sql_query(
+                                        f"SELECT nome, COUNT(*) AS cnt FROM sistema5_itens "
+                                        f"WHERE familia = '{_fam_id_ls}' AND nome IS NOT NULL "
+                                        f"AND TRIM(nome) != '' {_cex_ls} "
+                                        f"GROUP BY nome ORDER BY cnt DESC LIMIT 20",
+                                        conn
+                                    )
                                 _struct_ws = ['CONJUNTO', 'KIT', 'JOGO', 'VARIADOS',
                                               'SORTIDOS', 'SORTIDO']
                                 _tipo_up_ls = _tipo_ls.upper()
@@ -16731,6 +16769,13 @@ if _is_active("gerar_descricoes"):
                                                   for k in _pals_ls)]
                                 if not _exs_ls:
                                     _exs_ls = _df_exls['nome'].tolist()
+                                # refinar por material (evitar PELÚCIA quando tipo é PLÁSTICO)
+                                if _mat_kws_ls:
+                                    _exs_ls_mat = [r for r in _exs_ls
+                                                   if any(k in (r or '').upper()
+                                                          for k in _mat_kws_ls)]
+                                    if _exs_ls_mat:
+                                        _exs_ls = _exs_ls_mat
                                 # preferir exemplos sem CONJUNTO/KIT se tipo não os tem
                                 if not _extra_ls:
                                     _exs_ls_sc = [r for r in _exs_ls
