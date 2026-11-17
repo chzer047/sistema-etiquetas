@@ -16343,8 +16343,18 @@ if _is_active("gerar_descricoes"):
             try:
                 _pals_fam = [p for p in (_sai_tipo or '').upper().split() if len(p) > 3]
                 if _pals_fam:
+                    import unicodedata as _udnfam
+                    def _nkw(s):
+                        return ''.join(c for c in _udnfam.normalize('NFD', s.upper())
+                                       if _udnfam.category(c) != 'Mn')
                     _cond_fam = ' AND '.join(
-                        f"UPPER(nome) LIKE '%{p}%'" for p in _pals_fam[:2])
+                        f"UPPER(nome) LIKE '%{_nkw(p)}%'" for p in _pals_fam[:2])
+                    # Material keywords para busca mais precisa
+                    _mat_kws_fam = [_nkw(p) for p in _reSaiB.split(
+                        r'[\s,/]+', (_sai_mat or '')) if len(p.strip()) > 3][:2]
+                    _cond_mat_fam = (' AND (' + ' OR '.join(
+                        f"UPPER(nome) LIKE '%{k}%'" for k in _mat_kws_fam) + ')'
+                        if _mat_kws_fam else '')
                     _cond_cli_fam = (
                         f"AND UPPER(TRIM(cliente_base)) = "
                         f"'{(_sai_cliente or '').upper().strip()}'"
@@ -16352,12 +16362,23 @@ if _is_active("gerar_descricoes"):
                     _df_fam = pd.read_sql_query(
                         f"SELECT fabrica, familia, cliente_base, categoria, "
                         f"COUNT(*) AS cnt FROM sistema5_itens "
-                        f"WHERE nome IS NOT NULL AND ({_cond_fam}) AND fabrica IS NOT NULL "
-                        f"{_cond_cli_fam} "
+                        f"WHERE nome IS NOT NULL AND ({_cond_fam}){_cond_mat_fam} "
+                        f"AND fabrica IS NOT NULL {_cond_cli_fam} "
                         f"GROUP BY fabrica, familia, cliente_base, categoria "
                         f"ORDER BY cnt DESC LIMIT 5",
                         conn
                     )
+                    # Fallback: sem filtro de material
+                    if _df_fam.empty and _cond_mat_fam:
+                        _df_fam = pd.read_sql_query(
+                            f"SELECT fabrica, familia, cliente_base, categoria, "
+                            f"COUNT(*) AS cnt FROM sistema5_itens "
+                            f"WHERE nome IS NOT NULL AND ({_cond_fam}) "
+                            f"AND fabrica IS NOT NULL {_cond_cli_fam} "
+                            f"GROUP BY fabrica, familia, cliente_base, categoria "
+                            f"ORDER BY cnt DESC LIMIT 5",
+                            conn
+                        )
                     st.session_state['gd_sai_fam_sugs'] = (
                         _df_fam.to_dict('records') if not _df_fam.empty else [])
                     # Buscar exemplos reais da família encontrada e adaptar descrição
@@ -16652,17 +16673,37 @@ if _is_active("gerar_descricoes"):
                     try:
                         _pals_ls = [p for p in _tipo_ls.upper().split() if len(p) > 3]
                         if _pals_ls and _dims_ls:
+                            import unicodedata as _udnls
+                            def _nkwls(s):
+                                return ''.join(c for c in _udnls.normalize('NFD', s.upper())
+                                               if _udnls.category(c) != 'Mn')
                             _cond_ls = ' AND '.join(
-                                f"UPPER(nome) LIKE '%{p}%'" for p in _pals_ls[:2])
+                                f"UPPER(nome) LIKE '%{_nkwls(p)}%'" for p in _pals_ls[:2])
+                            _mat_kws_ls = [_nkwls(p) for p in _reLS.split(
+                                r'[\s,/]+', _mat_ls) if len(p.strip()) > 3][:2]
+                            _cond_mat_ls = (' AND (' + ' OR '.join(
+                                f"UPPER(nome) LIKE '%{k}%'" for k in _mat_kws_ls) + ')'
+                                if _mat_kws_ls else '')
                             _df_fls = pd.read_sql_query(
                                 f"SELECT fabrica, familia, cliente_base, categoria, "
                                 f"COUNT(*) AS cnt FROM sistema5_itens "
-                                f"WHERE nome IS NOT NULL AND ({_cond_ls}) "
+                                f"WHERE nome IS NOT NULL AND ({_cond_ls}){_cond_mat_ls} "
                                 f"AND fabrica IS NOT NULL {_cond_cli_ls} "
                                 f"GROUP BY fabrica, familia, cliente_base, categoria "
                                 f"ORDER BY cnt DESC LIMIT 3",
                                 conn
                             )
+                            # Fallback: sem filtro de material
+                            if _df_fls.empty and _cond_mat_ls:
+                                _df_fls = pd.read_sql_query(
+                                    f"SELECT fabrica, familia, cliente_base, categoria, "
+                                    f"COUNT(*) AS cnt FROM sistema5_itens "
+                                    f"WHERE nome IS NOT NULL AND ({_cond_ls}) "
+                                    f"AND fabrica IS NOT NULL {_cond_cli_ls} "
+                                    f"GROUP BY fabrica, familia, cliente_base, categoria "
+                                    f"ORDER BY cnt DESC LIMIT 3",
+                                    conn
+                                )
                             if not _df_fls.empty:
                                 _bls = _df_fls.iloc[0]
                                 _fabrica_ls = str(_bls.get('fabrica') or '')
