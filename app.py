@@ -3130,6 +3130,7 @@ def preencher_excel_confirmacao(uploaded_file, escolhas_pre=None):
 
     preenchidos = 0
     nao_encontrados = []
+    alertas_blocos = []  # itens com BLOCOS DE MONTAR sem qtd de peças
 
     diagnostico = {
         "referencias_verdes_lidas": 0,
@@ -3204,6 +3205,18 @@ def preencher_excel_confirmacao(uploaded_file, escolhas_pre=None):
                     cell.value = str(valor)
                 elif campo == "NOME":
                     cell.value = limitar_nome(valor)
+                    # Alerta: BLOCOS DE MONTAR sem quantidade de peças
+                    import re as _re_bloco
+                    _nome_up = valor.upper()
+                    if 'BLOCO' in _nome_up:
+                        _tem_qtd = bool(_re_bloco.search(
+                            r'C/\s*\d+\s*PÇS|C/\s*\d+\s*PCS|\d+\s*PEÇAS|\d+\s*PARTES',
+                            _nome_up))
+                        if not _tem_qtd:
+                            alertas_blocos.append({
+                                'ref': refs[0] if refs else '?',
+                                'nome': valor
+                            })
                 else:
                     cell.value = valor
 
@@ -3214,6 +3227,7 @@ def preencher_excel_confirmacao(uploaded_file, escolhas_pre=None):
     output.seek(0)
 
     st.session_state["diagnostico_confirmacao"] = diagnostico
+    st.session_state["alertas_blocos_confirmacao"] = alertas_blocos
 
     return output, preenchidos, nao_encontrados
 
@@ -10827,6 +10841,16 @@ if _is_active("confirmacao"):
             )
 
             st.success(f"Preenchimento concluído ✅ {total_preenchidos} células preenchidas.")
+
+            # Alerta: BLOCOS DE MONTAR sem quantidade de peças
+            _alertas_bl = st.session_state.get("alertas_blocos_confirmacao", [])
+            if _alertas_bl:
+                st.warning(
+                    f"⚠️ **{len(_alertas_bl)} item(ns) com BLOCOS DE MONTAR sem quantidade de peças (C/ X PÇS)** — "
+                    f"preencha manualmente a quantidade antes de usar a etiqueta:"
+                )
+                for _ab in _alertas_bl:
+                    st.error(f"🔴 Ref: **{_ab['ref']}** — `{_ab['nome']}`")
 
             # Verifica divergências de código de barras entre o que foi preenchido e o Sistema 5
             _divs_cod = []
