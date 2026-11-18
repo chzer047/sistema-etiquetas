@@ -8943,6 +8943,7 @@ st.sidebar.markdown("<div style='color:rgba(255,255,255,0.35);font-size:10px;fon
 _nav_btn("IP-BRI Pendentes","pendentes",    "⏳")
 _nav_btn("Cobertura",       "cobertura",    "📊")
 _nav_btn("Correção Códigos","correcao",     "🔧")
+_nav_btn("Qualidade Desc.", "qualidade_desc", "🔎")
 _nav_btn("Etiquetas",       "etiquetas",    "🏷️")
 
 st.sidebar.markdown("<div style='color:rgba(255,255,255,0.35);font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;padding:0 4px;margin:8px 0 4px'>Ajuda</div>", unsafe_allow_html=True)
@@ -12513,6 +12514,190 @@ if _is_active("correcao"):
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
+
+
+# ==========================================
+# ABA QUALIDADE DAS DESCRIÇÕES
+# ==========================================
+
+if _is_active("qualidade_desc"):
+    st.title("🔎 Qualidade das Descrições")
+    st.caption(
+        "Verifica se os campos `nome` do Sistema 5 seguem a ordem correta: "
+        "**TIPO → MATERIAL → [C/ N PÇS] → [VARIEDADE] → PRODUZIDO POR → MEDIDAS → MECANISMO → INDICATIVO → RESTRITIVO/SEM RESTRIÇÃO**"
+    )
+
+    import re as _re_qd
+
+    # ---- Filtros ----
+    _qd_col1, _qd_col2, _qd_col3 = st.columns(3)
+    with _qd_col1:
+        try:
+            _qd_clientes = ['— todos —'] + sorted([
+                r[0] for r in conn.execute(
+                    "SELECT DISTINCT UPPER(TRIM(cliente_base)) FROM sistema5_itens "
+                    "WHERE cliente_base IS NOT NULL AND TRIM(cliente_base)!='' "
+                    "ORDER BY 1").fetchall()
+            ])
+        except Exception:
+            _qd_clientes = ['— todos —']
+        _qd_cli = st.selectbox("Cliente", _qd_clientes, key="qd_cliente")
+    with _qd_col2:
+        try:
+            _qd_fams_raw = conn.execute(
+                "SELECT DISTINCT familia FROM sistema5_itens "
+                "WHERE familia IS NOT NULL AND TRIM(familia)!='' ORDER BY familia"
+            ).fetchall()
+            _qd_familias = ['— todas —'] + [r[0] for r in _qd_fams_raw]
+        except Exception:
+            _qd_familias = ['— todas —']
+        _qd_fam = st.selectbox("Família", _qd_familias, key="qd_familia")
+    with _qd_col3:
+        _qd_limite = st.number_input("Máx. registros a verificar", 500, 50000, 10000, 500,
+                                     key="qd_limite")
+
+    if st.button("🔍 Verificar agora", key="qd_btn_verificar", type="primary"):
+        _qd_where = "WHERE nome IS NOT NULL AND TRIM(nome) != ''"
+        if _qd_cli != '— todos —':
+            _qd_where += f" AND UPPER(TRIM(cliente_base)) = '{_qd_cli}'"
+        if _qd_fam != '— todas —':
+            _qd_where += f" AND familia = '{_qd_fam.replace(chr(39), chr(39)*2)}'"
+
+        with st.spinner("Carregando descrições..."):
+            try:
+                _df_qd = pd.read_sql_query(
+                    f"SELECT id, modelo, nome, familia, fabrica, cliente_base "
+                    f"FROM sistema5_itens {_qd_where} "
+                    f"LIMIT {int(_qd_limite)}",
+                    conn
+                )
+            except Exception as _eq:
+                st.error(f"Erro ao consultar banco: {_eq}")
+                _df_qd = pd.DataFrame()
+
+        if _df_qd.empty:
+            st.info("Nenhum registro encontrado com os filtros selecionados.")
+        else:
+            st.info(f"Verificando {len(_df_qd):,} descrições...")
+
+            # ---- Regras de verificação ----
+            # Retorna True se a descrição tem erro nessa regra
+            def _pos(texto, palavra):
+                """Posição da palavra no texto (0 = não encontrada)."""
+                idx = texto.upper().find(palavra.upper())
+                return idx if idx >= 0 else None
+
+            _erros_qd = []
+
+            for _, _r in _df_qd.iterrows():
+                _nome = str(_r.get('nome') or '')
+                _nu = _nome.upper()
+                _erros_item = []
+
+                _p_prod  = _pos(_nu, 'PRODUZIDO')
+                _p_med   = _pos(_nu, 'MEDIDAS')
+                _p_mec   = _pos(_nu, 'MECANISMO')
+                _p_ind   = _pos(_nu, 'INDICATIVO')
+                _p_var   = _pos(_nu, 'VARIADOS')
+                _p_sort  = _pos(_nu, 'SORTIDO')   # captura SORTIDO e SORTIDOS
+                _p_rest  = _pos(_nu, 'RESTRITIVO')
+                _p_semr  = _pos(_nu, 'SEM RESTRIÇÃO')
+
+                # 1) VARIADOS depois de PRODUZIDO (errado)
+                if _p_var is not None and _p_prod is not None and _p_var > _p_prod:
+                    _erros_item.append("VARIADOS depois de PRODUZIDO POR")
+
+                # 2) SORTIDO(S) depois de PRODUZIDO (errado)
+                if _p_sort is not None and _p_prod is not None and _p_sort > _p_prod:
+                    _erros_item.append("SORTIDO(S) depois de PRODUZIDO POR")
+
+                # 3) MEDIDAS antes de PRODUZIDO (errado)
+                if _p_med is not None and _p_prod is not None and _p_med < _p_prod:
+                    _erros_item.append("MEDIDAS antes de PRODUZIDO POR")
+
+                # 4) MECANISMO antes de MEDIDAS (errado)
+                if _p_mec is not None and _p_med is not None and _p_mec < _p_med:
+                    _erros_item.append("MECANISMO antes de MEDIDAS")
+
+                # 5) INDICATIVO antes de MECANISMO (errado)
+                if _p_ind is not None and _p_mec is not None and _p_ind < _p_mec:
+                    _erros_item.append("INDICATIVO antes de MECANISMO")
+
+                # 6) Sem PRODUZIDO
+                if _p_prod is None:
+                    _erros_item.append("Sem PRODUZIDO POR")
+
+                # 7) Sem MEDIDAS
+                if _p_med is None:
+                    _erros_item.append("Sem MEDIDAS")
+
+                # 8) Sem MECANISMO
+                if _p_mec is None:
+                    _erros_item.append("Sem MECANISMO")
+
+                # 9) Sem INDICATIVO
+                if _p_ind is None:
+                    _erros_item.append("Sem INDICATIVO")
+
+                # 10) Sem RESTRITIVO nem SEM RESTRIÇÃO
+                if _p_rest is None and _p_semr is None:
+                    _erros_item.append("Sem RESTRITIVO/SEM RESTRIÇÃO")
+
+                if _erros_item:
+                    _erros_qd.append({
+                        'Modelo': _r.get('modelo', ''),
+                        'Família': _r.get('familia', ''),
+                        'Fábrica': _r.get('fabrica', ''),
+                        'Cliente': _r.get('cliente_base', ''),
+                        'Erros': ' | '.join(_erros_item),
+                        'Descrição': _nome,
+                    })
+
+            if not _erros_qd:
+                st.success(f"✅ Nenhum erro de ordem encontrado nos {len(_df_qd):,} registros verificados!")
+            else:
+                _df_err = pd.DataFrame(_erros_qd)
+                st.error(f"⚠️ **{len(_df_err):,} descrições com problemas** em {len(_df_qd):,} verificadas "
+                         f"({100*len(_df_err)/len(_df_qd):.1f}%)")
+
+                # Resumo por tipo de erro
+                st.subheader("Resumo por tipo de erro")
+                _contagem_erros = {}
+                for _e in _erros_qd:
+                    for _tp in _e['Erros'].split(' | '):
+                        _contagem_erros[_tp] = _contagem_erros.get(_tp, 0) + 1
+                _df_res = pd.DataFrame(
+                    sorted(_contagem_erros.items(), key=lambda x: -x[1]),
+                    columns=['Tipo de erro', 'Qtd']
+                )
+                st.dataframe(_df_res, use_container_width=True, hide_index=True)
+
+                # Filtro por tipo de erro
+                st.subheader("Detalhamento")
+                _tipos_disp = ['— todos —'] + list(_df_res['Tipo de erro'])
+                _qd_filtro_err = st.selectbox("Filtrar por tipo de erro", _tipos_disp,
+                                              key="qd_filtro_err")
+                if _qd_filtro_err != '— todos —':
+                    _df_show = _df_err[_df_err['Erros'].str.contains(
+                        _re_qd.escape(_qd_filtro_err), case=False, na=False)]
+                else:
+                    _df_show = _df_err
+
+                st.dataframe(_df_show[['Modelo','Cliente','Família','Erros','Descrição']],
+                             use_container_width=True, hide_index=True)
+
+                # Download
+                _buf_qd = __import__('io').BytesIO()
+                with pd.ExcelWriter(_buf_qd, engine='openpyxl') as _wqd:
+                    _df_err.to_excel(_wqd, index=False, sheet_name='Erros')
+                    _df_res.to_excel(_wqd, index=False, sheet_name='Resumo')
+                _buf_qd.seek(0)
+                st.download_button(
+                    "⬇️ Baixar relatório (.xlsx)", data=_buf_qd,
+                    file_name="qualidade_descricoes.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="qd_download"
+                )
 
 
 # ==========================================
