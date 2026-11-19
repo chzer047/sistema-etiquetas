@@ -3113,16 +3113,19 @@ def preencher_excel_confirmacao(uploaded_file, escolhas_pre=None):
             uploaded_file.seek(0)
             with open(_src, "wb") as _f:
                 _f.write(uploaded_file.read())
+            _matar_processos_libreoffice()  # limpa instâncias residuais antes
             _sub_conf.run(
                 [_soff, "--headless", "--convert-to", "xlsx", "--outdir", _tdir, _src,
                  f"-env:UserInstallation=file://{_tdir}/lo"],
                 capture_output=True, timeout=120
             )
+            _matar_processos_libreoffice()  # libera o processo após a conversão
             _convertidos = _glob_conf.glob(_os_conf.path.join(_tdir, "*.xlsx"))
             _convertido = next((x for x in _convertidos if "entrada" in x), None) or (_convertidos[0] if _convertidos else None)
             if _convertido:
                 wb = load_workbook(_convertido)
         except Exception as _e4:
+            _matar_processos_libreoffice()  # garante limpeza mesmo em erro
             _exc_final = _e4
 
     if wb is None:
